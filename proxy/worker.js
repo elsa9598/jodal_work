@@ -224,9 +224,64 @@ function mapNotice(it) {
     opening: (it.opengDt || '').slice(0, 16),
     status: _statusOf(it.bidClseDt),
     days_left: _daysLeft(it.bidClseDt),
+    posted: (it.bidNtceDt || '').slice(0, 16),
     flag: presmpt ? null : '기초금액 확인필요',
     _real: true,
   };
+}
+
+// ── 새 토목·포장 공고 알리미 (Cron) ──
+function _parseDt(s) {
+  const m = String(s || '').match(/(\d{4})-?(\d{2})-?(\d{2})[ T]?(\d{2})?:?(\d{2})?/);
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0));
+}
+
+async function sendAlertEmail(env, list) {
+  if (!env.RESEND_API_KEY || !env.ALERT_EMAIL) return false;
+  const rows = list.map((n) =>
+    `▸ ${n.title}\n   ${n.agency} · ${n.work} · 기초 ${
+      (n.base_price || 0).toLocaleString('ko-KR')}원 · 마감 ${
+      n.deadline} (D-${n.days_left})\n   공고번호 ${n.notice_no}`,
+  ).join('\n\n');
+  const body = {
+    from: 'onboarding@resend.dev',
+    to: [env.ALERT_EMAIL],
+    subject: `[조달 알리미] 새 서울 토목·포장 공고 ${list.length}건`,
+    text:
+      `서울시 관공서 토목·포장 신규 입찰공고 ${list.length}건이 떴습니다.\n\n` +
+      `${rows}\n\n` +
+      `─────────\n앱에서 보기: https://elsa9598.github.io/jodal_work/\n` +
+      `※ 참고용 — 투찰 전 조달청 원문 공고 반드시 확인`,
+  };
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + env.RESEND_API_KEY,
+    },
+    body: JSON.stringify(body),
+  });
+  return res.ok;
+}
+
+async function runAlert(env) {
+  // 직전 예약(09/19 KST)~지금 사이 게시된 토목·포장만 → 중복 없이 알림
+  const now = new Date();
+  const hUTC = now.getUTCHours();
+  // 이번이 09KST(00UTC)면 직전은 어제 19KST → 14h, 19KST(10UTC)면 직전 09KST → 10h
+  const lookbackH = hUTC < 5 ? 14 : 10;
+  const since = new Date(now.getTime() - lookbackH * 3600 * 1000);
+
+  const all = await fetchNoticeList(env.JODAL_API_KEY);
+  const fresh = all.filter((n) => {
+    if (!n.civil) return false;
+    const p = _parseDt(n.posted);
+    return p && p >= since;
+  });
+  if (!fresh.length) return { sent: false, count: 0 };
+  const ok = await sendAlertEmail(env, fresh);
+  return { sent: ok, count: fresh.length };
 }
 
 async function fetchNoticeList(serviceKey) {
@@ -277,12 +332,18 @@ async function fetchNoticeList(serviceKey) {
 }
 
 export default {
+  // Cron(하루 2회) → 새 토목·포장 공고 메일 알림
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runAlert(env));
+  },
+
   async fetch(request, env) {
     const origin = env.ALLOWED_ORIGIN || 'https://elsa9598.github.io';
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
     const url = new URL(request.url);
+    // (알리미는 Cron 으로만 동작 — 공개 테스트 엔드포인트는 보안상 제거)
     if (request.method !== 'POST' ||
         (url.pathname !== '/analyze' && url.pathname !== '/notice' &&
          url.pathname !== '/list')) {
