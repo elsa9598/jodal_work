@@ -190,18 +190,30 @@ function _statusOf(s) {
 }
 
 async function fetchNoticeList(serviceKey) {
-  const end = new Date();
-  const begin = new Date();
-  begin.setDate(begin.getDate() - 20);
+  // 조달청 API 는 조회기간(약 1개월) 한도가 있어 30일 청크 ×3 = 90일로 분할
   const out = [];
-  for (let page = 1; page <= 4; page++) {
-    const body = await callJodal(NOTICE_URL, {
-      serviceKey, pageNo: String(page), numOfRows: '100', type: 'json',
-      inqryDiv: '1',
-      inqryBgnDt: ymd(begin) + '0000', inqryEndDt: ymd(end) + '2359',
-    });
-    const list = asList(body);
-    for (const it of list) {
+  const seen = {};
+  const CHUNK = 30, CHUNKS = 3;
+  for (let c = 0; c < CHUNKS; c++) {
+    const end = new Date();
+    end.setDate(end.getDate() - c * CHUNK);
+    const begin = new Date();
+    begin.setDate(begin.getDate() - (c + 1) * CHUNK);
+    for (let page = 1; page <= 3; page++) {
+      let body;
+      try {
+        body = await callJodal(NOTICE_URL, {
+          serviceKey, pageNo: String(page), numOfRows: '100', type: 'json',
+          inqryDiv: '1',
+          inqryBgnDt: ymd(begin) + '0000', inqryEndDt: ymd(end) + '2359',
+        });
+      } catch (e) { break; } // 한 청크 실패해도 나머지 진행
+      const list = asList(body);
+      if (!list.length) break;
+      for (const it of list) {
+        const key = (it.bidNtceNo || '') + '-' + (it.bidNtceOrd || '0');
+        if (seen[key]) continue;
+        seen[key] = 1;
       const region = (it.cnstrtsiteRgnNm || '') + ' ' +
         (it.ntceInsttNm || '') + ' ' + (it.dminsttNm || '');
       const name = it.bidNtceNm || '';
@@ -233,8 +245,9 @@ async function fetchNoticeList(serviceKey) {
         flag: presmpt ? null : '기초금액 확인필요',
         _real: true,
       });
+      }
+      if (page * 100 >= toNum(body.totalCount)) break;
     }
-    if (page * 100 >= toNum(body.totalCount)) break;
   }
   out.sort((a, b) => a.days_left - b.days_left);
   return out;

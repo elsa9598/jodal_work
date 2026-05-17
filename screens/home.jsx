@@ -38,7 +38,7 @@ function HomeScreen({ onGo, onOpenNotice, saved, onToggleSave }) {
           <div style={{ flex: 1 }}>
             <div className="kicker"><span className="bar"></span>나라장터 공공데이터 · 서울 · 토목·포장 전용</div>
             <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: '-0.03em', lineHeight: 1.15, marginTop: 10 }}>
-              과거 유사 공사 <span style={{ color: 'var(--accent)' }}>42건</span>을 기반으로<br/>
+              조달청 <span style={{ color: 'var(--accent)' }}>실낙찰 데이터</span> 기반으로<br/>
               오늘의 투찰 후보 금액을 계산합니다.
             </div>
             <div style={{ fontSize: 13.5, color: 'var(--ink-mid)', marginTop: 12, maxWidth: 600, lineHeight: 1.6 }}>
@@ -62,6 +62,7 @@ function HomeScreen({ onGo, onOpenNotice, saved, onToggleSave }) {
             <div style={{ fontSize: 11, color: 'var(--ink-low)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               오늘의 추천 공고
             </div>
+            {NOTICES[0] ? (
             <div
               onClick={() => onOpenNotice(NOTICES[0])}
               style={{
@@ -71,19 +72,29 @@ function HomeScreen({ onGo, onOpenNotice, saved, onToggleSave }) {
                 cursor: 'pointer',
               }}
             >
-              <div style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700, marginBottom: 6 }}>AI 추천 · 중간형 전략 적합</div>
+              <div style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700, marginBottom: 6 }}>실시간 · 마감 임박순 1순위</div>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8, lineHeight: 1.4 }}>{NOTICES[0].title}</div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--ink-mid)' }}>
                 <span>{NOTICES[0].agency}</span>
                 <span className="tnum">D-{NOTICES[0].days_left}</span>
               </div>
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--line)', fontSize: 12 }}>
-                <span className="muted">중간형 추천가 · </span>
+                <span className="muted">기초금액 · </span>
                 <span className="tnum strong" style={{ color: 'var(--accent)' }}>
-                  {fmt(Math.round(NOTICES[0].base_price * 0.9998 * NOTICES[0].lower_rate / 100))} 원
+                  {fmt(NOTICES[0].base_price)} 원
                 </span>
               </div>
             </div>
+            ) : (
+            <div style={{
+              padding: 16, borderRadius: 14, background: 'rgba(0,0,0,0.35)',
+              border: '1px solid var(--line)', fontSize: 12.5, color: 'var(--ink-low)',
+              lineHeight: 1.6,
+            }}>
+              조달청 실데이터 불러오는 중…<br/>
+              서울 토목·포장 진행 공고가 없으면 비어 있을 수 있습니다.
+            </div>
+            )}
           </div>
         </div>
       </div>
@@ -92,8 +103,8 @@ function HomeScreen({ onGo, onOpenNotice, saved, onToggleSave }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 22 }}>
         <KpiCard label="진행 중 공고" value={open.length} suffix="건" tone="accent" sub="서울 토목·포장 전용 필터링" />
         <KpiCard label="마감 임박 (3일↓)" value={today.length} suffix="건" tone="warn" sub="놓치면 안 되는 공고" />
-        <KpiCard label="총 기초금액" value={fmt억(totalBase)} sub={`평균 ${fmt억(totalBase / open.length)} / 건`} />
-        <KpiCard label="유사 공사 분석 풀" value="42" suffix="건" sub="최근 6개월 · 도로포장·토목" />
+        <KpiCard label="총 기초금액" value={fmt억(totalBase)} sub={`평균 ${fmt억(open.length ? totalBase / open.length : 0)} / 건`} />
+        <KpiCard label="관심 등록" value={saved ? saved.size : 0} suffix="건" sub="저장한 공고" />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.55fr 1fr', gap: 16 }}>

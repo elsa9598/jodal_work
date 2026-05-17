@@ -7,8 +7,8 @@ function HistoryScreen({ onGo }) {
 
   const won = MY_HISTORY.filter(h => h.won).length;
   const total = MY_HISTORY.length;
-  const successRate = (won / total * 100).toFixed(1);
-  const avgDiff = Math.round(MY_HISTORY.reduce((s, h) => s + h.diff, 0) / total);
+  const successRate = total ? (won / total * 100).toFixed(1) : '0.0';
+  const avgDiff = total ? Math.round(MY_HISTORY.reduce((s, h) => s + h.diff, 0) / total) : 0;
 
   // 공종별
   const byWork = {};
