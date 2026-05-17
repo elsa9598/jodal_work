@@ -1,17 +1,17 @@
-// review.jsx — OCR 검토 screen, 3 layout variants (tabs / split / accordion)
+// review.jsx — Single-capture OCR review (v2)
+// 4 cards: 원본 이미지 / OCR 원문 / AI 추출 / 사용자 수정
+// Layout variants: stacked / tabs / accordion
 
-// Render corrections highlight in raw text
 function RawText({ raw, corrections }) {
-  if (!corrections || corrections.length === 0) {
-    return <div className="raw-text">{raw}</div>;
+  if (!corrections || corrections.length === 0 || !raw) {
+    return <div className="raw-text">{raw || '(OCR 원문 없음)'}</div>;
   }
-  // Highlight every "from" occurrence; works for short tokens only
-  // Build into spans
+  const tokens = corrections.map((c) => c.from).filter(Boolean);
+  if (tokens.length === 0) return <div className="raw-text">{raw}</div>;
+  const re = new RegExp(
+    tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g',
+  );
   const parts = [];
-  let remaining = raw;
-  const tokens = corrections.map((c) => c.from);
-  // simple replace one-pass
-  const re = new RegExp(tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
   let lastIdx = 0;
   for (const m of raw.matchAll(re)) {
     if (m.index > lastIdx) parts.push(raw.slice(lastIdx, m.index));
@@ -22,34 +22,68 @@ function RawText({ raw, corrections }) {
   return <div className="raw-text">{parts}</div>;
 }
 
-// Render the editable fields & diff for a single capture
-function CaptureFields({ capture, userValues, onChange }) {
+// Group fields by their `group` key
+function groupFields(fields) {
+  const groups = { notice: [], amount: [], rate: [] };
+  fields.forEach((f) => {
+    const g = f.group || 'notice';
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(f);
+  });
+  return groups;
+}
+
+const GROUP_LABELS = {
+  notice: '공고 정보',
+  amount: '금액 정보',
+  rate:   '사정률 정보',
+};
+
+// Fields editor — one row per field, grouped
+function FieldsEditor({ capture, userVals, onChange }) {
+  const groups = groupFields(capture.fields);
   return (
     <div>
-      {capture.fields.map((f) => {
-        const aiVal = capture.ai[f.key] ?? '';
-        const userVal = userValues[f.key] ?? aiVal;
-        const modified = userVal !== aiVal;
-        const corr = capture.corrections.find((c) => c.field === f.key);
+      {Object.entries(groups).map(([gid, fs]) => {
+        if (fs.length === 0) return null;
         return (
-          <div key={f.key} className="field">
-            <label className="field-label">
-              <span>{f.label}{f.unit && <span className="muted"> ({f.unit})</span>}</span>
-              {corr && <span className="field-label-tag">자동보정</span>}
-              {f.critical && !corr && <span className="field-label-tag" style={{
-                color: 'var(--navy-700)', background: 'var(--navy-100)',
-              }}>계산 필수</span>}
-            </label>
-            <input className={`field-input ${modified ? 'modified' : ''}`}
-                   value={userVal}
-                   onChange={(e) => onChange(capture.id, f.key, e.target.value)} />
-            {corr && (
-              <div style={{ fontSize: 11, color: 'var(--ink-500)', marginTop: -2 }}>
-                OCR 원문 <span className="danger-text">{corr.from}</span> →
-                AI 보정값 <b style={{ color: 'var(--green-600)' }}>{corr.to}</b>
-                <span className="muted"> · {corr.reason}</span>
-              </div>
-            )}
+          <div key={gid} style={{ marginBottom: 14 }}>
+            <div style={{
+              fontSize: 11, fontWeight: 700, color: 'var(--navy-700)',
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              marginBottom: 8, paddingBottom: 6,
+              borderBottom: '1px solid var(--ink-100)',
+            }}>{GROUP_LABELS[gid] || gid}</div>
+            {fs.map((f) => {
+              const aiVal = capture.ai[f.key] ?? '';
+              const userVal = userVals[f.key] ?? aiVal;
+              const modified = userVal !== aiVal;
+              const corr = capture.corrections.find((c) => c.field === f.key);
+              return (
+                <div key={f.key} className="field">
+                  <label className="field-label">
+                    <span>{f.label}{f.unit && <span className="muted"> ({f.unit})</span>}</span>
+                    {corr && <span className="field-label-tag">자동보정</span>}
+                    {f.critical && !corr && (
+                      <span className="field-label-tag" style={{
+                        color: 'var(--navy-700)', background: 'var(--navy-100)',
+                      }}>계산 필수</span>
+                    )}
+                  </label>
+                  <input className={`field-input ${modified ? 'modified' : ''}`}
+                         value={userVal}
+                         placeholder={f.critical ? '값 입력 필요' : ''}
+                         onChange={(e) => onChange(f.key, e.target.value)} />
+                  {corr && (
+                    <div style={{ fontSize: 11, color: 'var(--ink-500)', marginTop: -2 }}>
+                      OCR 원문 <span className="danger-text">{corr.from}</span> →
+                      AI 보정 <b style={{ color: 'var(--green-600)' }}>{corr.to}</b>
+                      <span className="muted"> · {corr.reason}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         );
       })}
@@ -57,214 +91,87 @@ function CaptureFields({ capture, userValues, onChange }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Variant A — Tabs (compact)
-// ─────────────────────────────────────────────────────────────
-function ReviewTabs({ activeIdx, setActiveIdx, userVals, onChange, onInspect, captures }) {
-  const cap = captures[activeIdx];
-  const [tab, setTab] = React.useState('all'); // all | image | raw | ai
+// ── Card components (reused across layouts) ─────────────────────────────────
+function ImageCard({ capture, onInspect, compact }) {
   return (
-    <>
-      <div className="chip-nav">
-        {captures.map((c, i) => {
-          const hasCorr = c.corrections.length > 0;
-          return (
-            <button key={c.id}
-                    className={`chip ${i === activeIdx ? 'active' : 'complete'} ${hasCorr ? 'has-correction' : ''}`}
-                    onClick={() => setActiveIdx(i)}>
-              <span className="chip-dot" />
-              {c.id}. {c.title}
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="tabs">
-        {[
-          ['all', '전체'],
-          ['image', '원본'],
-          ['raw', 'OCR 원문'],
-          ['ai', 'AI/수정'],
-        ].map(([k, l]) => (
-          <button key={k} className={`tab ${tab === k ? 'active' : ''}`}
-                  onClick={() => setTab(k)}>{l}</button>
-        ))}
-      </div>
-
-      {(tab === 'all' || tab === 'image') && (
-        <div className="card">
-          <div className="card-title">
-            <span className="card-title-num">1</span>
-            원본 캡처 이미지
-          </div>
-          <div onClick={() => onInspect(activeIdx)} style={{ cursor: 'zoom-in' }}>
-            <MockCapture index={activeIdx} />
-          </div>
-          <button className="btn btn-ghost"
-                  onClick={() => onInspect(activeIdx)}
-                  style={{ marginTop: 8 }}>
-            🔍 핀치줌으로 자세히 보기
-          </button>
+    <div className="card" style={compact ? { padding: 10 } : undefined}>
+      {!compact && (
+        <div className="card-title">
+          <span className="card-title-num">1</span>
+          원본 캡처 이미지
+          {capture.real && (
+            <span className="pill pill-info" style={{ marginLeft: 'auto' }}>
+              실제 업로드
+            </span>
+          )}
         </div>
       )}
-
-      {(tab === 'all' || tab === 'raw') && (
-        <div className="card">
-          <div className="card-title">
-            <span className="card-title-num">2</span>
-            OCR 원문 텍스트
-            {cap.corrections.length > 0 && (
-              <span className="pill pill-warn" style={{ marginLeft: 'auto' }}>
-                보정 {cap.corrections.length}건
-              </span>
-            )}
-          </div>
-          <RawText raw={cap.raw} corrections={cap.corrections} />
-        </div>
-      )}
-
-      {(tab === 'all' || tab === 'ai') && (
-        <div className="card">
-          <div className="card-title">
-            <span className="card-title-num">3</span>
-            AI 추출값 · 사용자 수정
-          </div>
-          <CaptureFields capture={cap} userValues={userVals[cap.id] || {}}
-                         onChange={onChange} />
-        </div>
-      )}
-    </>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Variant B — Split (image top, OCR+fields stacked below)
-// ─────────────────────────────────────────────────────────────
-function ReviewSplit({ activeIdx, setActiveIdx, userVals, onChange, onInspect, captures }) {
-  const cap = captures[activeIdx];
-  return (
-    <>
-      <div className="chip-nav">
-        {captures.map((c, i) => (
-          <button key={c.id}
-                  className={`chip ${i === activeIdx ? 'active' : 'complete'} ${c.corrections.length > 0 ? 'has-correction' : ''}`}
-                  onClick={() => setActiveIdx(i)}>
-            <span className="chip-dot" />
-            {c.id}. {c.title}
-          </button>
-        ))}
-      </div>
-
-      <div className="card" style={{ padding: 10 }}>
-        <div onClick={() => onInspect(activeIdx)} style={{ cursor: 'zoom-in', position: 'relative' }}>
-          <MockCapture index={activeIdx} />
+      <div onClick={onInspect} style={{ cursor: 'zoom-in', position: 'relative' }}>
+        <CaptureImage imageUrl={capture.imageUrl} alt={capture.title} />
+        {compact && (
           <div style={{
             position: 'absolute', top: 8, right: 8,
             background: 'rgba(13, 27, 42, 0.85)', color: '#fff',
             fontSize: 11, padding: '4px 8px', borderRadius: 6,
           }}>🔍 탭하여 확대</div>
-        </div>
+        )}
       </div>
-
-      <div className="card">
-        <div className="card-title">
-          <span className="card-title-num">{cap.id}</span>
-          {cap.title} — OCR 원문
-          {cap.corrections.length > 0 && (
-            <span className="pill pill-warn" style={{ marginLeft: 'auto' }}>
-              보정 {cap.corrections.length}건
-            </span>
-          )}
-        </div>
-        <RawText raw={cap.raw} corrections={cap.corrections} />
-      </div>
-
-      <div className="card">
-        <div className="card-title">AI 추출값 · 직접 수정</div>
-        <CaptureFields capture={cap} userValues={userVals[cap.id] || {}}
-                       onChange={onChange} />
-      </div>
-    </>
+      {!compact && (
+        <button className="btn btn-ghost" onClick={onInspect}
+                style={{ marginTop: 8 }}>
+          🔍 핀치줌으로 자세히 보기
+        </button>
+      )}
+    </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Variant C — Accordion (all 5 captures, expand one at a time)
-// ─────────────────────────────────────────────────────────────
-function ReviewAccordion({ openIdx, setOpenIdx, userVals, onChange, onInspect, captures }) {
+function RawCard({ capture }) {
   return (
-    <>
-      {captures.map((cap, i) => {
-        const open = openIdx === i;
-        const hasCorr = cap.corrections.length > 0;
-        return (
-          <div key={cap.id} className={`acc-item ${open ? 'open' : ''}`}>
-            <div className="acc-head" onClick={() => setOpenIdx(open ? -1 : i)}>
-              <div style={{
-                width: 28, height: 28, borderRadius: 8,
-                background: open ? 'var(--navy-800)' : 'var(--navy-50)',
-                color: open ? '#fff' : 'var(--navy-800)',
-                fontSize: 12, fontWeight: 700,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                flexShrink: 0,
-              }}>{cap.id}</div>
-              <b>{cap.title}</b>
-              {hasCorr && (
-                <span className="pill pill-warn">보정 {cap.corrections.length}</span>
-              )}
-              <span className="acc-chevron">›</span>
-            </div>
-            {open && (
-              <div className="acc-body">
-                <div style={{ marginTop: 12, marginBottom: 12 }}
-                     onClick={() => onInspect(i)}>
-                  <MockCapture index={i} />
-                </div>
-                <button className="btn btn-ghost"
-                        onClick={() => onInspect(i)}
-                        style={{ marginBottom: 12 }}>
-                  🔍 핀치줌으로 자세히 보기
-                </button>
-                <div style={{
-                  fontSize: 11, fontWeight: 600, color: 'var(--ink-500)',
-                  textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8,
-                }}>OCR 원문</div>
-                <RawText raw={cap.raw} corrections={cap.corrections} />
-                <div style={{
-                  fontSize: 11, fontWeight: 600, color: 'var(--ink-500)',
-                  textTransform: 'uppercase', letterSpacing: '0.06em',
-                  marginTop: 14, marginBottom: 8,
-                }}>AI 추출 · 직접 수정</div>
-                <CaptureFields capture={cap} userValues={userVals[cap.id] || {}}
-                               onChange={onChange} />
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </>
+    <div className="card">
+      <div className="card-title">
+        <span className="card-title-num">2</span>
+        OCR 원문 텍스트
+        {capture.corrections.length > 0 && (
+          <span className="pill pill-warn" style={{ marginLeft: 'auto' }}>
+            자동 보정 {capture.corrections.length}건
+          </span>
+        )}
+      </div>
+      <RawText raw={capture.raw} corrections={capture.corrections} />
+    </div>
+  );
+}
+
+function ExtractedCard({ capture, userVals, onChange }) {
+  return (
+    <div className="card">
+      <div className="card-title">
+        <span className="card-title-num">3</span>
+        AI 추출 · 직접 수정
+      </div>
+      <FieldsEditor capture={capture} userVals={userVals} onChange={onChange} />
+    </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────
-// Review screen wrapper — picks layout by tweak
+// ReviewScreen — picks layout by tweak
 // ─────────────────────────────────────────────────────────────
-function ReviewScreen({ layout, captures, userVals, setUserVals, onBack, onConfirm, onInspect }) {
-  const [activeIdx, setActiveIdx] = React.useState(0);
-  const [openAcc, setOpenAcc] = React.useState(0);
-
-  const onChange = React.useCallback((capId, key, val) => {
-    setUserVals((prev) => ({
-      ...prev,
-      [capId]: { ...(prev[capId] || {}), [key]: val },
-    }));
+function ReviewScreen({ layout, capture, userVals, setUserVals,
+                        onBack, onConfirm, onInspect }) {
+  const onChange = React.useCallback((key, val) => {
+    setUserVals((prev) => ({ ...prev, [key]: val }));
   }, [setUserVals]);
 
-  // Aggregate stats
-  const totalCorr = captures.reduce((s, c) => s + c.corrections.length, 0);
-  const totalEdits = Object.values(userVals).reduce(
-    (s, v) => s + Object.keys(v).length, 0,
-  );
+  const editCount = Object.keys(userVals).filter((k) => {
+    const ai = capture.ai[k] ?? '';
+    return (userVals[k] ?? ai) !== ai;
+  }).length;
+  const corrCount = capture.corrections.length;
+
+  const [tab, setTab] = React.useState('all');     // for tabs layout
+  const [openAcc, setOpenAcc] = React.useState(0); // for accordion layout
 
   return (
     <div className="app" data-screen-label="04 OCR 검토">
@@ -273,7 +180,8 @@ function ReviewScreen({ layout, captures, userVals, setUserVals, onBack, onConfi
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="app-header-title">OCR 추출 데이터 검토</div>
           <div className="app-header-sub">
-            보정 <b style={{ color: '#fff' }}>{totalCorr}</b>건 · 직접 수정 <b style={{ color: '#fff' }}>{totalEdits}</b>건
+            보정 <b style={{ color: '#fff' }}>{corrCount}</b>건 ·
+            직접 수정 <b style={{ color: '#fff' }}>{editCount}</b>건
           </div>
         </div>
       </div>
@@ -288,26 +196,90 @@ function ReviewScreen({ layout, captures, userVals, setUserVals, onBack, onConfi
           잘못 인식된 값은 직접 수정하고 <b>최종 확정</b>해주세요.
         </div>
 
+        {layout === 'stacked' && (
+          <>
+            <ImageCard capture={capture} onInspect={onInspect} />
+            <RawCard capture={capture} />
+            <ExtractedCard capture={capture} userVals={userVals} onChange={onChange} />
+          </>
+        )}
+
         {layout === 'tabs' && (
-          <ReviewTabs activeIdx={activeIdx} setActiveIdx={setActiveIdx}
-                      userVals={userVals} onChange={onChange}
-                      onInspect={onInspect} captures={captures} />
+          <>
+            <div className="tabs">
+              {[['all', '전체'], ['image', '원본'], ['raw', 'OCR 원문'], ['fields', 'AI/수정']].map(([k, l]) => (
+                <button key={k} className={`tab ${tab === k ? 'active' : ''}`}
+                        onClick={() => setTab(k)}>{l}</button>
+              ))}
+            </div>
+            {(tab === 'all' || tab === 'image') && <ImageCard capture={capture} onInspect={onInspect} />}
+            {(tab === 'all' || tab === 'raw')   && <RawCard capture={capture} />}
+            {(tab === 'all' || tab === 'fields') && (
+              <ExtractedCard capture={capture} userVals={userVals} onChange={onChange} />
+            )}
+          </>
         )}
-        {layout === 'split' && (
-          <ReviewSplit activeIdx={activeIdx} setActiveIdx={setActiveIdx}
-                       userVals={userVals} onChange={onChange}
-                       onInspect={onInspect} captures={captures} />
-        )}
+
         {layout === 'accordion' && (
-          <ReviewAccordion openIdx={openAcc} setOpenIdx={setOpenAcc}
-                           userVals={userVals} onChange={onChange}
-                           onInspect={onInspect} captures={captures} />
+          <>
+            {[
+              { key: 'image', title: '원본 캡처 이미지', n: 1 },
+              { key: 'raw',   title: 'OCR 원문 텍스트', n: 2 },
+              { key: 'edit',  title: 'AI 추출 · 직접 수정', n: 3 },
+            ].map((sec, i) => {
+              const open = openAcc === i;
+              return (
+                <div key={sec.key} className={`acc-item ${open ? 'open' : ''}`}>
+                  <div className="acc-head" onClick={() => setOpenAcc(open ? -1 : i)}>
+                    <div style={{
+                      width: 28, height: 28, borderRadius: 8,
+                      background: open ? 'var(--navy-800)' : 'var(--navy-50)',
+                      color: open ? '#fff' : 'var(--navy-800)',
+                      fontSize: 12, fontWeight: 700,
+                      display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', flexShrink: 0,
+                    }}>{sec.n}</div>
+                    <b>{sec.title}</b>
+                    {sec.key === 'raw' && corrCount > 0 && (
+                      <span className="pill pill-warn">보정 {corrCount}</span>
+                    )}
+                    <span className="acc-chevron">›</span>
+                  </div>
+                  {open && (
+                    <div className="acc-body">
+                      {sec.key === 'image' && (
+                        <>
+                          <div style={{ marginTop: 12, marginBottom: 12 }}
+                               onClick={onInspect}>
+                            <CaptureImage imageUrl={capture.imageUrl} />
+                          </div>
+                          <button className="btn btn-ghost" onClick={onInspect}>
+                            🔍 핀치줌으로 자세히 보기
+                          </button>
+                        </>
+                      )}
+                      {sec.key === 'raw' && (
+                        <div style={{ paddingTop: 14 }}>
+                          <RawText raw={capture.raw} corrections={capture.corrections} />
+                        </div>
+                      )}
+                      {sec.key === 'edit' && (
+                        <div style={{ paddingTop: 14 }}>
+                          <FieldsEditor capture={capture} userVals={userVals} onChange={onChange} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </>
         )}
       </div>
 
       <div className="app-footer">
         <button className="btn btn-primary" onClick={onConfirm}>
-          ✓ 최종 확정 후 계산하기
+          ✓ 최종 확정 후 분석 시작
         </button>
       </div>
     </div>

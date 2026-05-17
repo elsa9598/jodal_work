@@ -1,8 +1,8 @@
-// ImageInspector — fullscreen pinch-zoom + drag inspector
+// ImageInspector — fullscreen pinch-zoom + drag inspector for capture images.
 // Touch: 1 finger drags, 2 fingers pinch-zoom.
 // Mouse: wheel zooms (toward cursor), drag pans, double-click to reset.
 
-function ImageInspector({ open, title, imageUrl, onClose }) {
+function ImageInspector({ open, title, captureIndex, imageUrl, onClose }) {
   const stageRef = React.useRef(null);
   const innerRef = React.useRef(null);
   const [state, setState] = React.useState({ scale: 1, x: 0, y: 0 });
@@ -11,18 +11,19 @@ function ImageInspector({ open, title, imageUrl, onClose }) {
 
   React.useEffect(() => {
     if (open) setState({ scale: 1, x: 0, y: 0 });
-  }, [open, imageUrl]);
+  }, [open, captureIndex]);
 
   const clamp = (s) => Math.max(1, Math.min(5, s));
 
+  // Pointer / touch handling
   React.useEffect(() => {
     if (!open) return undefined;
     const stage = stageRef.current;
     if (!stage) return undefined;
 
     let pointers = new Map();
-    let pinchStart = null;
-    let dragStart  = null;
+    let pinchStart = null;     // { dist, midX, midY, scale, tx, ty }
+    let dragStart  = null;     // { x, y, tx, ty }
 
     const setStateRef = (next) => {
       stateRef.current = next;
@@ -35,6 +36,7 @@ function ImageInspector({ open, title, imageUrl, onClose }) {
     const onDown = (e) => {
       stage.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
       if (pointers.size === 1) {
         const cur = stateRef.current;
         dragStart = { x: e.clientX, y: e.clientY, tx: cur.x, ty: cur.y };
@@ -43,8 +45,12 @@ function ImageInspector({ open, title, imageUrl, onClose }) {
         const m = mid(a, b);
         const cur = stateRef.current;
         pinchStart = {
-          dist: dist(a, b), midX: m.x, midY: m.y,
-          scale: cur.scale, tx: cur.x, ty: cur.y,
+          dist: dist(a, b),
+          midX: m.x,
+          midY: m.y,
+          scale: cur.scale,
+          tx: cur.x,
+          ty: cur.y,
         };
         dragStart = null;
       }
@@ -53,10 +59,12 @@ function ImageInspector({ open, title, imageUrl, onClose }) {
     const onMove = (e) => {
       if (!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
       if (pointers.size === 2 && pinchStart) {
         const [a, b] = [...pointers.values()];
         const newDist = dist(a, b);
         const newScale = clamp(pinchStart.scale * (newDist / pinchStart.dist));
+        // pivot around start midpoint relative to stage center
         const rect = stage.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
         const cy = rect.top + rect.height / 2;
@@ -68,7 +76,7 @@ function ImageInspector({ open, title, imageUrl, onClose }) {
         setStateRef({ scale: newScale, x: tx, y: ty });
       } else if (pointers.size === 1 && dragStart) {
         const cur = stateRef.current;
-        if (cur.scale <= 1.001) return;
+        if (cur.scale <= 1.001) return; // no panning when fully zoomed out
         setStateRef({
           ...cur,
           x: dragStart.tx + (e.clientX - dragStart.x),
@@ -81,6 +89,8 @@ function ImageInspector({ open, title, imageUrl, onClose }) {
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinchStart = null;
       if (pointers.size < 1) dragStart  = null;
+      // when going from 2 → 1, refresh drag origin so the remaining finger
+      // doesn't snap.
       if (pointers.size === 1) {
         const [a] = [...pointers.values()];
         const cur = stateRef.current;
@@ -149,9 +159,10 @@ function ImageInspector({ open, title, imageUrl, onClose }) {
             <img src={imageUrl} alt={title}
                  style={{ display: 'block', width: '100%', height: 'auto',
                           maxHeight: '88vh', objectFit: 'contain',
-                          borderRadius: 8, userSelect: 'none' }} />
+                          borderRadius: 8, userSelect: 'none',
+                          WebkitUserDrag: 'none' }} />
           ) : (
-            <MockCapture />
+            <MockCapture index={captureIndex} />
           )}
         </div>
         <div className="zoom-tip">두 손가락으로 확대 · 한 손가락으로 이동 · 더블 클릭으로 원래대로</div>

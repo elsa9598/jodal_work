@@ -1,57 +1,33 @@
-// result.jsx — Final result dashboard with 8 cards
+// result.jsx — Final result dashboard (v2: single capture + AI analysis)
+// 9 cards. Helpers + sub-cards live in result-utils.js & result-parts.jsx.
 
-function formatNum(n) {
-  if (n == null || isNaN(n)) return '-';
-  return Math.round(n).toLocaleString('en-US');
-}
-
-function parseAmount(s) {
-  if (s == null) return NaN;
-  return Number(String(s).replace(/[^\d.-]/g, ''));
-}
-
-function ResultScreen({ captures, userVals, onBack, onReanalyze, onInspect }) {
-  // Build effective values: AI value with user override on top
-  const eff = (cap, key) => {
-    const u = userVals[cap.id]?.[key];
-    return u !== undefined && u !== '' ? u : cap.ai[key];
+function ResultScreen({ capture, userVals, analysis, analysisError,
+                        onBack, onReanalyze, onInspect, onRunAnalysis }) {
+  // Resolve effective values (user override > AI extracted)
+  const eff = (key) => {
+    const u = userVals[key];
+    return u !== undefined && u !== '' ? u : (capture.ai[key] ?? '');
   };
 
-  // Extract calculation inputs
-  const cap2 = captures.find((c) => c.id === 2);
-  const cap3 = captures.find((c) => c.id === 3);
-  const cap4 = captures.find((c) => c.id === 4);
-  const cap5 = captures.find((c) => c.id === 5);
+  const basePrice  = parseAmount(eff('base_price'));
+  const lowerBound = parseAmount(eff('lower_bound_rate'));
 
-  const basePrice  = parseAmount(eff(cap2, 'base_price'));
-  const lowerBound = parseAmount(eff(cap3, 'lower_bound_rate'));
-  const primaryRate = parseAmount(eff(cap5, 'primary_target_rate'));
-  const recStart   = parseAmount(eff(cap4, 'recommend_rate_start'));
-  const recEnd     = parseAmount(eff(cap4, 'recommend_rate_end'));
+  const hasRequired = !isNaN(basePrice) && !isNaN(lowerBound);
+  const strategies = analysis?.strategies;
+  const recommendation = analysis?.recommendation || 'middle';
+  const recRate = strategies?.[recommendation]?.rate;
+  const recBidPrice = hasRequired && recRate != null
+    ? bidPrice(basePrice, recRate, lowerBound) : null;
 
-  // Applied rate priority: primary → avg(start,end) → none
-  let appliedRate = null;
-  let appliedReason = '';
-  if (!isNaN(primaryRate)) {
-    appliedRate = primaryRate;
-    appliedReason = '1순위 사정률 적용';
-  } else if (!isNaN(recStart) && !isNaN(recEnd)) {
-    appliedRate = (recStart + recEnd) / 2;
-    appliedReason = '추천 사정률 구간 평균 적용';
-  }
+  const corrections = capture.corrections || [];
+  const editCount = Object.keys(userVals).filter((k) => {
+    const ai = capture.ai[k] ?? '';
+    return (userVals[k] ?? ai) !== ai;
+  }).length;
 
-  const hasAll = !isNaN(basePrice) && !isNaN(lowerBound) && appliedRate != null;
-  const expected = hasAll
-    ? basePrice * (appliedRate / 100) * (lowerBound / 100)
-    : null;
-
-  const totalCorr = captures.reduce((s, c) => s + c.corrections.length, 0);
-  const totalEdits = Object.values(userVals).reduce(
-    (s, v) => s + Object.keys(v).length, 0,
-  );
-
-  // Confidence: high if no missing & few corrections, medium if some, low if missing
-  const confidence = !hasAll ? 'low' : totalCorr > 3 ? 'medium' : 'high';
+  // Confidence
+  const confidence = !hasRequired ? 'low'
+    : corrections.length > 2 ? 'medium' : 'high';
   const confidenceLabel = { high: '높음', medium: '보통', low: '낮음' }[confidence];
   const confidenceColor = { high: '#2e9d54', medium: '#d97706', low: '#d32f2f' }[confidence];
   const confidencePct = { high: 92, medium: 72, low: 38 }[confidence];
@@ -63,187 +39,241 @@ function ResultScreen({ captures, userVals, onBack, onReanalyze, onInspect }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="app-header-title">조달청 낙찰 예상 결과</div>
           <div className="app-header-sub">
-            {captures[0]?.ai?.notice_no || '-'} · {cap2?.ai?.business_type || ''}
+            {eff('notice_no') || '-'} · {eff('business_type') || ''}
           </div>
         </div>
       </div>
 
       <div className="app-body">
 
-        {/* ── Card 1: Status ── */}
+        {/* Card 1: Status */}
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {hasAll
+          {hasRequired
             ? <span className="pill pill-ok">✓ 분석 완료</span>
-            : <span className="pill pill-error">❌ 필수 데이터 누락</span>
-          }
-          {totalCorr > 0 && (
-            <span className="pill pill-warn">⚠ 자동 보정 {totalCorr}건</span>
+            : <span className="pill pill-error">❌ 필수 데이터 누락</span>}
+          {analysis && <span className="pill pill-info">AI 유사공사 {analysis.similar_count}건 분석</span>}
+          {corrections.length > 0 && (
+            <span className="pill pill-warn">⚠ 자동 보정 {corrections.length}건</span>
           )}
-          {totalEdits > 0 && (
-            <span className="pill pill-info">✎ 직접 수정 {totalEdits}건</span>
+          {editCount > 0 && (
+            <span className="pill pill-info">✎ 직접 수정 {editCount}건</span>
+          )}
+          {analysisError && (
+            <span className="pill pill-error">AI 분석 오류</span>
           )}
         </div>
 
-        {/* ── Card 2: HERO — Expected bid price ── */}
-        <div className="result-hero">
-          <div className="result-hero-label">최종 예상 투찰 금액</div>
-          {hasAll ? (
-            <>
-              <div className="result-hero-amount">
-                {formatNum(expected)}<span className="result-hero-amount-unit">원</span>
-              </div>
-              <div className="result-hero-meta">
-                <div className="result-hero-meta-cell">
-                  적용 사정률<b>{appliedRate.toFixed(3)}%</b>
-                </div>
-                <div className="result-hero-meta-cell">
-                  낙찰하한율<b>{lowerBound.toFixed(3)}%</b>
-                </div>
-                <div className="result-hero-meta-cell">
-                  기초금액<b>{formatNum(basePrice)}원</b>
-                </div>
-              </div>
-            </>
-          ) : (
+        {/* Card 2: 3-tier strategy hero */}
+        {hasRequired && strategies ? (
+          <StrategyHero
+            basePrice={basePrice}
+            lowerBound={lowerBound}
+            strategies={strategies}
+            recommendation={recommendation}
+          />
+        ) : (
+          <div className="result-hero">
+            <div className="result-hero-label">최종 예상 투찰 금액</div>
             <div style={{
               fontSize: 18, fontWeight: 700, color: 'var(--red-500)',
-              padding: '20px 0', lineHeight: 1.5,
+              padding: '12px 0', lineHeight: 1.5,
             }}>
-              계산 불가<br />
-              <span style={{ fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.75)' }}>
-                기초금액 · 낙찰하한율 · 사정률 중 일부가 누락되었습니다.
+              {!hasRequired ? '계산 불가' : 'AI 분석 미실행'}<br />
+              <span style={{ fontSize: 13, fontWeight: 500,
+                             color: 'rgba(255,255,255,0.75)' }}>
+                {!hasRequired
+                  ? '기초금액 · 낙찰하한율이 필요합니다.'
+                  : '유사공사 분석이 아직 실행되지 않았습니다.'}
               </span>
             </div>
-          )}
-        </div>
+            {hasRequired && !strategies && onRunAnalysis && (
+              <button className="btn"
+                      onClick={onRunAnalysis}
+                      style={{ marginTop: 10, background: 'rgba(255,255,255,0.2)',
+                               color: '#fff', height: 40 }}>
+                AI 분석 실행하기
+              </button>
+            )}
+          </div>
+        )}
 
-        {/* ── Card 3: Notice info ── */}
+        {analysis?.recommendation_reason && (
+          <div style={{
+            padding: 12, borderRadius: 10, background: 'var(--navy-50)',
+            border: '1px solid var(--navy-100)', fontSize: 12,
+            color: 'var(--navy-800)', lineHeight: 1.55,
+          }}>
+            <b>{({conservative:'보수형',middle:'중간형',aggressive:'공격형'})[recommendation]}</b>을
+            추천하는 이유: {analysis.recommendation_reason}
+          </div>
+        )}
+
+        {/* Card 3: Notice info */}
         <div className="card">
           <div className="card-title">
             <span className="card-title-num">3</span>
             공고 정보
           </div>
-          <div className="kv"><div className="kv-key">공고번호</div>
-            <div className="kv-val">{eff(captures[0], 'notice_no')}</div></div>
-          <div className="kv"><div className="kv-key">공고명</div>
-            <div className="kv-val" style={{ fontSize: 13 }}>{eff(captures[0], 'title')}</div></div>
-          <div className="kv"><div className="kv-key">발주기관</div>
-            <div className="kv-val">{eff(captures[0], 'ordering_agency')}</div></div>
-          <div className="kv"><div className="kv-key">수요기관</div>
-            <div className="kv-val">{eff(captures[0], 'demand_agency')}</div></div>
-          <div className="kv"><div className="kv-key">업종</div>
-            <div className="kv-val">{eff(captures[0], 'business_type')}</div></div>
-          <div className="kv"><div className="kv-key">지역제한</div>
-            <div className="kv-val">{eff(captures[0], 'region_limit')}</div></div>
-          <div className="kv"><div className="kv-key">입찰마감</div>
-            <div className="kv-val kv-val-num">{eff(captures[0], 'deadline')}</div></div>
-          <div className="kv"><div className="kv-key">개찰일시</div>
-            <div className="kv-val kv-val-num">{eff(captures[0], 'opening_datetime')}</div></div>
+          {[
+            ['공고번호', 'notice_no'],
+            ['공고명', 'title'],
+            ['발주기관', 'ordering_agency'],
+            ['수요기관', 'demand_agency'],
+            ['업종', 'business_type'],
+            ['지역제한', 'region_limit'],
+            ['입찰마감', 'deadline'],
+            ['개찰일시', 'opening_datetime'],
+          ].map(([label, key]) => (
+            <div key={key} className="kv">
+              <div className="kv-key">{label}</div>
+              <div className="kv-val" style={{
+                fontSize: key === 'title' ? 13 : 14,
+                fontVariantNumeric: 'tabular-nums',
+              }}>{eff(key) || '-'}</div>
+            </div>
+          ))}
         </div>
 
-        {/* ── Card 4: Calculation inputs ── */}
+        {/* Card 4: Calc info */}
         <div className="card">
           <div className="card-title">
             <span className="card-title-num">4</span>
             조달청 계산 정보
           </div>
-          <div className="kv"><div className="kv-key">기초금액</div>
+          <div className="kv">
+            <div className="kv-key">기초금액</div>
             <div className="kv-val kv-val-num" style={{ color: 'var(--navy-800)' }}>
-              {eff(cap2, 'base_price')} 원</div></div>
-          <div className="kv"><div className="kv-key">추정가격</div>
-            <div className="kv-val kv-val-num">{eff(cap2, 'estimated_price')} 원</div></div>
-          <div className="kv"><div className="kv-key">예정가격 범위</div>
-            <div className="kv-val kv-val-num">{eff(cap2, 'price_range')}</div></div>
-          <div className="kv"><div className="kv-key">A값</div>
-            <div className="kv-val kv-val-num">{eff(cap2, 'a_value')} 원</div></div>
-          <div className="kv"><div className="kv-key">순공사원가</div>
-            <div className="kv-val kv-val-num">{eff(cap2, 'pure_construction_cost')} 원</div></div>
-          <div className="kv"><div className="kv-key">낙찰하한율</div>
-            <div className="kv-val kv-val-num" style={{ color: 'var(--navy-800)' }}>
-              {eff(cap3, 'lower_bound_rate')} %</div></div>
-          <div className="kv"><div className="kv-key">추천 사정률</div>
-            <div className="kv-val kv-val-num">
-              {eff(cap4, 'recommend_rate_start')} ~ {eff(cap4, 'recommend_rate_end')} %</div></div>
-          <div className="kv"><div className="kv-key">1순위 사정률</div>
-            <div className="kv-val kv-val-num" style={{ color: 'var(--navy-800)' }}>
-              {eff(cap5, 'primary_target_rate')} %</div></div>
-          <div className="kv"><div className="kv-key">적용 사정률</div>
-            <div className="kv-val kv-val-num" style={{ color: 'var(--green-600)' }}>
-              {appliedRate != null ? appliedRate.toFixed(3) + ' %' : '-'}</div></div>
-          <div className="kv"><div className="kv-key">추천 투찰률</div>
-            <div className="kv-val kv-val-num">{eff(cap4, 'recommended_bid_rate')} %</div></div>
-          {appliedReason && (
-            <div style={{
-              fontSize: 11, color: 'var(--ink-500)', marginTop: 8,
-              padding: '6px 10px', background: 'var(--navy-50)',
-              borderRadius: 6, lineHeight: 1.4,
-            }}>
-              ℹ {appliedReason}
-            </div>
-          )}
-        </div>
-
-        {/* ── Card 5: OCR verification ── */}
-        <div className="card">
-          <div className="card-title">
-            <span className="card-title-num">5</span>
-            OCR 검증 결과
-            <span className="pill pill-info" style={{ marginLeft: 'auto' }}>
-              5장 / {totalCorr + totalEdits}건 변경
-            </span>
+              {eff('base_price') || '-'}{eff('base_price') && ' 원'}</div>
           </div>
-          {captures.flatMap((cap) =>
-            cap.corrections.map((corr) => {
-              const f = cap.fields.find((x) => x.key === corr.field);
-              const userVal = userVals[cap.id]?.[corr.field];
-              const aiVal = cap.ai[corr.field];
-              const finalVal = (userVal !== undefined && userVal !== '') ? userVal : aiVal;
-              return (
-                <div key={`${cap.id}-${corr.field}`} style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-900)', marginBottom: 4 }}>
-                    캡처 {cap.id} · {f?.label || corr.field}
-                  </div>
-                  <div className="diff-row">
-                    <div className="diff-label">OCR 원문</div>
-                    <div className="diff-val raw">{corr.from}</div>
-                  </div>
-                  <div className="diff-row">
-                    <div className="diff-label">AI 보정</div>
-                    <div className="diff-val ai">{corr.to}</div>
-                  </div>
-                  <div className="diff-row">
-                    <div className="diff-label">사용자</div>
-                    <div className="diff-val user">{userVal !== undefined && userVal !== '' ? userVal : '— (변경 없음)'}</div>
-                  </div>
-                  <div className="diff-row">
-                    <div className="diff-label">최종 적용</div>
-                    <div className="diff-val final">{finalVal}{f?.unit ? ` ${f.unit}` : ''}</div>
-                  </div>
-                </div>
-              );
-            })
-          )}
-          {totalCorr === 0 && (
-            <div style={{ fontSize: 12, color: 'var(--ink-500)', padding: '12px 0' }}>
-              자동 보정된 항목이 없습니다.
+          <div className="kv">
+            <div className="kv-key">추정가격</div>
+            <div className="kv-val kv-val-num">{eff('estimated_price') || '-'}{eff('estimated_price') && ' 원'}</div>
+          </div>
+          <div className="kv">
+            <div className="kv-key">예정가격 범위</div>
+            <div className="kv-val">{eff('price_range') || '-'}</div>
+          </div>
+          <div className="kv">
+            <div className="kv-key">A값</div>
+            <div className="kv-val kv-val-num">{eff('a_value') || '-'}{eff('a_value') && ' 원'}</div>
+          </div>
+          <div className="kv">
+            <div className="kv-key">순공사원가</div>
+            <div className="kv-val kv-val-num">{eff('pure_construction_cost') || '-'}{eff('pure_construction_cost') && ' 원'}</div>
+          </div>
+          <div className="kv">
+            <div className="kv-key">낙찰하한율</div>
+            <div className="kv-val kv-val-num" style={{ color: 'var(--navy-800)' }}>
+              {eff('lower_bound_rate') || '-'}{eff('lower_bound_rate') && ' %'}</div>
+          </div>
+          <div className="kv">
+            <div className="kv-key">투찰률 범위</div>
+            <div className="kv-val kv-val-num">{eff('bid_rate_range') || '-'}{eff('bid_rate_range') && ' %'}</div>
+          </div>
+          {recRate != null && (
+            <div className="kv">
+              <div className="kv-key">적용 사정률 (추천)</div>
+              <div className="kv-val kv-val-num" style={{ color: 'var(--green-600)' }}>
+                {recRate.toFixed(3)} %
+              </div>
             </div>
           )}
         </div>
 
-        {/* ── Card 6: Formula ── */}
+        {/* Card 5: Similar-work AI analysis */}
+        <SimilarWorkCard analysis={analysis} />
+
+        {/* Card 6: OCR verification */}
         <div className="card">
           <div className="card-title">
             <span className="card-title-num">6</span>
-            계산식
+            OCR 검증 결과
+            <span className="pill pill-info" style={{ marginLeft: 'auto' }}>
+              {corrections.length + editCount}건 변경
+            </span>
+          </div>
+          {corrections.length === 0 && editCount === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--ink-500)',
+                          padding: '12px 0' }}>
+              자동 보정·직접 수정 항목이 없습니다.
+            </div>
+          ) : (
+            <>
+              {corrections.map((corr) => {
+                const f = capture.fields.find((x) => x.key === corr.field);
+                const userVal = userVals[corr.field];
+                const aiVal = capture.ai[corr.field];
+                const finalVal = (userVal !== undefined && userVal !== '') ? userVal : aiVal;
+                return (
+                  <div key={corr.field} style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700,
+                                  color: 'var(--ink-900)', marginBottom: 4 }}>
+                      {f?.label || corr.field}
+                    </div>
+                    <div className="diff-row">
+                      <div className="diff-label">OCR 원문</div>
+                      <div className="diff-val raw">{corr.from}</div>
+                    </div>
+                    <div className="diff-row">
+                      <div className="diff-label">AI 보정</div>
+                      <div className="diff-val ai">{corr.to}</div>
+                    </div>
+                    <div className="diff-row">
+                      <div className="diff-label">사용자</div>
+                      <div className="diff-val user">
+                        {userVal !== undefined && userVal !== '' ? userVal : '— (변경 없음)'}
+                      </div>
+                    </div>
+                    <div className="diff-row">
+                      <div className="diff-label">최종 적용</div>
+                      <div className="diff-val final">
+                        {finalVal}{f?.unit ? ` ${f.unit}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {/* Show user edits without auto-corrections */}
+              {Object.keys(userVals).map((key) => {
+                if (corrections.find((c) => c.field === key)) return null; // already shown
+                const ai = capture.ai[key] ?? '';
+                const u = userVals[key];
+                if (u === ai || u == null) return null;
+                const f = capture.fields.find((x) => x.key === key);
+                return (
+                  <div key={key} style={{
+                    marginBottom: 8, paddingBottom: 8,
+                    borderBottom: '1px dashed var(--ink-200)',
+                  }}>
+                    <div style={{ fontSize: 12, fontWeight: 700,
+                                  color: 'var(--ink-900)' }}>
+                      {f?.label || key} <span style={{ fontSize: 10,
+                                                       color: 'var(--orange-500)' }}>· 직접 수정</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--ink-500)', marginTop: 2 }}>
+                      AI: {ai || '-'} → 사용자: <b style={{ color: 'var(--orange-600)' }}>{u}</b>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+
+        {/* Card 7: Formula */}
+        <div className="card">
+          <div className="card-title">
+            <span className="card-title-num">7</span>
+            계산식 ({({conservative:'보수형',middle:'중간형',aggressive:'공격형'})[recommendation]})
           </div>
           <div className="formula">
             <div className="formula-line">
               <span>기초금액</span>
-              <span className="num">{eff(cap2, 'base_price')}</span>
+              <span className="num">{eff('base_price') || '-'}</span>
             </div>
             <div className="formula-line">
               <span className="formula-op">× 적용 사정률</span>
-              <span className="num">{appliedRate != null ? appliedRate.toFixed(3) + '%' : '-'}</span>
+              <span className="num">{recRate != null ? recRate.toFixed(3) + '%' : '-'}</span>
             </div>
             <div className="formula-line">
               <span className="formula-op">× 낙찰하한율</span>
@@ -252,16 +282,16 @@ function ResultScreen({ captures, userVals, onBack, onReanalyze, onInspect }) {
             <div className="formula-line formula-eq">
               <span style={{ fontWeight: 700, color: 'var(--red-600)' }}>= 예상 투찰</span>
               <span className="formula-val">
-                {expected != null ? formatNum(expected) + '원' : '-'}
+                {recBidPrice != null ? formatNum(recBidPrice) + '원' : '-'}
               </span>
             </div>
           </div>
         </div>
 
-        {/* ── Card 7: OCR confidence ── */}
+        {/* Card 8: OCR confidence */}
         <div className="card">
           <div className="card-title">
-            <span className="card-title-num">7</span>
+            <span className="card-title-num">8</span>
             OCR 신뢰도
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
@@ -278,16 +308,22 @@ function ResultScreen({ captures, userVals, onBack, onReanalyze, onInspect }) {
               {confidenceLabel}
             </div>
           </div>
-          <div className="kv"><div className="kv-key">OCR 상태</div>
-            <div className="kv-val ok-text">success</div></div>
-          <div className="kv"><div className="kv-key">처리 이미지</div>
-            <div className="kv-val">5 / 5장</div></div>
-          <div className="kv"><div className="kv-key">자동 숫자 보정</div>
-            <div className="kv-val">{totalCorr}건</div></div>
-          <div className="kv"><div className="kv-key">사용자 직접 수정</div>
-            <div className="kv-val">{totalEdits}건</div></div>
-          <div className="kv"><div className="kv-key">누락 데이터</div>
-            <div className="kv-val">{hasAll ? '없음' : '있음'}</div></div>
+          <div className="kv">
+            <div className="kv-key">OCR 상태</div>
+            <div className="kv-val ok-text">{capture.real ? 'success (Claude vision)' : 'demo'}</div>
+          </div>
+          <div className="kv">
+            <div className="kv-key">자동 숫자 보정</div>
+            <div className="kv-val">{corrections.length}건</div>
+          </div>
+          <div className="kv">
+            <div className="kv-key">사용자 직접 수정</div>
+            <div className="kv-val">{editCount}건</div>
+          </div>
+          <div className="kv">
+            <div className="kv-key">누락 데이터</div>
+            <div className="kv-val">{hasRequired ? '없음' : '있음'}</div>
+          </div>
         </div>
 
         {/* Safety notice */}
@@ -296,27 +332,34 @@ function ResultScreen({ captures, userVals, onBack, onReanalyze, onInspect }) {
           border: '1px solid #f5d490', fontSize: 11, color: '#92590f',
           lineHeight: 1.6,
         }}>
-          본 결과는 비드큐 캡처 이미지에서 OCR로 추출한 데이터를 기반으로 계산한
+          본 결과는 비드큐 캡처 이미지 OCR + AI 통계 추정 기반
           <b> 참고용 시뮬레이션</b>입니다.
-          OCR 인식 오류 또는 원문 데이터 누락이 있을 수 있으므로,
-          최종 투찰 전 반드시 조달청 원문과 비드큐 원문을 직접 확인하세요.
-          본 앱은 실제 낙찰 결과를 보장하지 않습니다.
+          유사 공사 분석 데이터는 AI가 추정한 패턴이며 실제 개찰 결과를 보장하지 않습니다.
+          최종 투찰 전 반드시 조달청 원문과 나라장터 원문을 직접 확인하세요.
         </div>
       </div>
 
-      {/* ── Card 8: Bottom action bar ── */}
+      {/* Card 9: Bottom actions */}
       <div className="app-footer">
         <div className="btn-row">
-          <button className="btn btn-secondary" onClick={() => onInspect(0)}>
+          <button className="btn btn-secondary" onClick={onInspect}>
             🔍 원문 보기
           </button>
           <button className="btn btn-secondary"
-                  onClick={() => navigator.clipboard?.writeText(JSON.stringify({
-                    expected_bid_price: expected,
-                    base_price: basePrice,
-                    applied_rate: appliedRate,
-                    lower_bound_rate: lowerBound,
-                  }, null, 2))}>
+                  onClick={() => {
+                    const payload = {
+                      notice: { notice_no: eff('notice_no'), title: eff('title') },
+                      base_price: basePrice,
+                      lower_bound: lowerBound,
+                      analysis,
+                      bid_prices: strategies && Object.fromEntries(
+                        Object.entries(strategies).map(([k, s]) => [
+                          k, bidPrice(basePrice, s.rate, lowerBound),
+                        ]),
+                      ),
+                    };
+                    navigator.clipboard?.writeText(JSON.stringify(payload, null, 2));
+                  }}>
             📋 데이터 복사
           </button>
         </div>

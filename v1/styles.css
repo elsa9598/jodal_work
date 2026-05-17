@@ -807,14 +807,6 @@ button {
   display: block;
 }
 
-/* Single upload hero slot (v2) */
-.upload-slot.upload-hero {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0;
-  padding: 12px;
-}
-
 /* Misc */
 .muted { color: var(--ink-500); }
 .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }

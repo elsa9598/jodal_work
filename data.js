@@ -1,136 +1,100 @@
-// Demo OCR data based on the 기획서 example (123,456,000원 → 108,345,200원)
+// data.js — single capture schema with ALL fields combined
+// (v2: 1장 캡처 → OCR → AI 유사공사 분석)
 
-const DEMO_CAPTURES = [
-  {
-    id: 1,
-    title: '공고 기본 정보',
-    raw: `[공고 정보]
-공고번호  20251115-00834-00
-공고명    2025년 OO시 OO구 도로보수공사
-발주기관  OO시 OO구청
-수요기관  OO구 도로관리과
-업종      토목공사업
-지역제한  OO시 관내
-입찰마감  2025-11-28 10:00
-개찰일시  2025-11-28 11:00`,
-    ai: {
-      notice_no: '20251115-00834-00',
-      title: '2025년 OO시 OO구 도로보수공사',
-      ordering_agency: 'OO시 OO구청',
-      demand_agency: 'OO구 도로관리과',
-      business_type: '토목공사업',
-      region_limit: 'OO시 관내',
-      deadline: '2025-11-28 10:00',
-      opening_datetime: '2025-11-28 11:00',
-    },
-    fields: [
-      { key: 'notice_no', label: '공고번호' },
-      { key: 'title', label: '공고명' },
-      { key: 'ordering_agency', label: '발주기관' },
-      { key: 'demand_agency', label: '수요기관' },
-      { key: 'business_type', label: '업종' },
-      { key: 'region_limit', label: '지역제한' },
-      { key: 'deadline', label: '입찰 마감일시' },
-      { key: 'opening_datetime', label: '개찰일시' },
-    ],
-    corrections: [],
-  },
-  {
-    id: 2,
-    title: '금액 정보',
-    raw: `[금액 정보]
-기초금액      123,456,000원
-추정가격      112,233,000원
-예정가격 범위 -3% ~ +3%
-부가세 포함   포함
-순공사원가    98,765,000원
-A값           4,567,000원`,
-    ai: {
-      base_price: '123,456,000',
-      estimated_price: '112,233,000',
-      price_range: '-3% ~ +3%',
-      vat_included: '포함',
-      pure_construction_cost: '98,765,000',
-      a_value: '4,567,000',
-    },
-    fields: [
-      { key: 'base_price', label: '기초금액', unit: '원', critical: true },
-      { key: 'estimated_price', label: '추정가격', unit: '원' },
-      { key: 'price_range', label: '예정가격 범위' },
-      { key: 'vat_included', label: '부가세 포함' },
-      { key: 'pure_construction_cost', label: '순공사원가', unit: '원' },
-      { key: 'a_value', label: 'A값', unit: '원' },
-    ],
-    corrections: [],
-  },
-  {
-    id: 3,
-    title: '낙찰하한율 분석',
-    raw: `[낙찰하한율 분석]
-낙찰하한율    87.745%
-투찰률        87.5 ~ 88.0%
-예가 범위     -3% ~ +3%
-사정률 기준값 100.000%`,
-    ai: {
-      lower_bound_rate: '87.745',
-      bid_rate_range: '87.5 ~ 88.0',
-      price_range: '-3% ~ +3%',
-      base_rate: '100.000',
-    },
-    fields: [
-      { key: 'lower_bound_rate', label: '낙찰하한율', unit: '%', critical: true },
-      { key: 'bid_rate_range', label: '투찰률 범위', unit: '%' },
-      { key: 'price_range', label: '예가 범위' },
-      { key: 'base_rate', label: '사정률 기준값', unit: '%' },
-    ],
-    corrections: [],
-  },
-  {
-    id: 4,
-    title: '비드큐 추천 분석',
-    raw: `[비드큐 AI 추천]
-추천 사정률 시작값  99.850%
-추천 사정률 끝값    100.150%
-추천 투찰률         87.745%
-AI 추천 분석값      예가 상위구간 추천`,
-    ai: {
-      recommend_rate_start: '99.850',
-      recommend_rate_end: '100.150',
-      recommended_bid_rate: '87.745',
-      ai_recommendation: '예가 상위구간 추천',
-    },
-    fields: [
-      { key: 'recommend_rate_start', label: '추천 사정률 시작값', unit: '%' },
-      { key: 'recommend_rate_end', label: '추천 사정률 끝값', unit: '%' },
-      { key: 'recommended_bid_rate', label: '추천 투찰률', unit: '%' },
-      { key: 'ai_recommendation', label: 'AI 추천 분석' },
-    ],
-    corrections: [],
-  },
-  {
-    id: 5,
-    title: '1순위 사정률 / 경쟁 분석',
-    raw: `[1순위 사정률 / 경쟁 분석]
-1순위 사정률      1OO.O32%
-경쟁사 분석값     12개사 / 평균 87.6%
-개찰 예측 데이터  상위 추정구간
-최종 추천값       100.032%`,
-    ai: {
-      primary_target_rate: '100.032',
-      competition: '12개사 / 평균 87.6%',
-      opening_prediction: '상위 추정구간',
-      final_recommendation: '100.032',
-    },
-    fields: [
-      { key: 'primary_target_rate', label: '1순위 사정률', unit: '%', critical: true },
-      { key: 'competition', label: '경쟁사 분석' },
-      { key: 'opening_prediction', label: '개찰 예측' },
-      { key: 'final_recommendation', label: '최종 추천값', unit: '%' },
-    ],
-    corrections: [
-      { field: 'primary_target_rate', from: '1OO.O32%', to: '100.032%', reason: 'O를 0으로 자동 보정 (2건)' },
-    ],
-  },
-];
+const CAPTURE_SCHEMA = {
+  title: '비드큐 공고 분석 화면',
 
-window.DEMO_CAPTURES = DEMO_CAPTURES;
+  // All extractable fields from one BidQ screen
+  // Critical fields are required for the bid calculation.
+  fields: [
+    // 공고 정보
+    { key: 'notice_no',           label: '공고번호',      group: 'notice' },
+    { key: 'title',               label: '공고명',        group: 'notice' },
+    { key: 'ordering_agency',     label: '발주기관',      group: 'notice' },
+    { key: 'demand_agency',       label: '수요기관',      group: 'notice' },
+    { key: 'business_type',       label: '업종',          group: 'notice' },
+    { key: 'region_limit',        label: '지역제한',      group: 'notice' },
+    { key: 'deadline',            label: '입찰 마감일시', group: 'notice' },
+    { key: 'opening_datetime',    label: '개찰일시',      group: 'notice' },
+
+    // 금액 정보
+    { key: 'base_price',          label: '기초금액',      group: 'amount', unit: '원', critical: true },
+    { key: 'estimated_price',     label: '추정가격',      group: 'amount', unit: '원' },
+    { key: 'price_range',         label: '예정가격 범위', group: 'amount' },
+    { key: 'a_value',             label: 'A값',           group: 'amount', unit: '원' },
+    { key: 'pure_construction_cost', label: '순공사원가',  group: 'amount', unit: '원' },
+
+    // 사정률 정보
+    { key: 'lower_bound_rate',    label: '낙찰하한율',    group: 'rate',   unit: '%', critical: true },
+    { key: 'bid_rate_range',      label: '투찰률 범위',   group: 'rate',   unit: '%' },
+  ],
+};
+
+// Demo data — for the "데모로 채우기" fallback. Based on the spec example.
+const DEMO_CAPTURE = {
+  raw: `[비드큐 공고 분석]
+공고번호    20251115-00834-00
+공고명      2025년 OO시 OO구 도로보수공사
+발주기관    OO시 OO구청
+수요기관    OO구 도로관리과
+업종        토목공사업
+지역제한    OO시 관내
+입찰 마감   2025-11-28 10:00
+개찰일시    2025-11-28 11:00
+기초금액    123,456,000원
+추정가격    112,233,000원
+예정가격    -3% ~ +3%
+A값         4,567,000원
+순공사원가  98,765,000원
+낙찰하한율  87.745%
+투찰률      87.5 ~ 88.0%`,
+  ai: {
+    notice_no: '20251115-00834-00',
+    title: '2025년 OO시 OO구 도로보수공사',
+    ordering_agency: 'OO시 OO구청',
+    demand_agency: 'OO구 도로관리과',
+    business_type: '토목공사업',
+    region_limit: 'OO시 관내',
+    deadline: '2025-11-28 10:00',
+    opening_datetime: '2025-11-28 11:00',
+    base_price: '123,456,000',
+    estimated_price: '112,233,000',
+    price_range: '-3% ~ +3%',
+    a_value: '4,567,000',
+    pure_construction_cost: '98,765,000',
+    lower_bound_rate: '87.745',
+    bid_rate_range: '87.5 ~ 88.0',
+  },
+  corrections: [
+    { field: 'lower_bound_rate', from: '87.74S%', to: '87.745%',
+      reason: 'S를 5로 자동 보정' },
+  ],
+};
+
+// Demo AI similar-work analysis result
+const DEMO_ANALYSIS = {
+  similar_count: 42,
+  business_type: '토목공사업',
+  region: 'OO시',
+  base_price_range: '1억 ~ 1억5천만',
+  avg_bid_rate: 87.842,
+  avg_target_rate: 99.985,
+  hot_range_low: 99.94,
+  hot_range_high: 100.03,
+  top_rate: 99.98,
+  recent_trend: '최근 3개월간 100% 근처 사정률이 집중되어 있습니다.',
+  strategies: {
+    conservative: { rate: 99.85, label: '보수형',
+                    desc: '낮은 사정률 — 안정적 낙찰 가능성' },
+    middle:       { rate: 99.98, label: '중간형',
+                    desc: '평균 사정률 — 균형 잡힌 전략' },
+    aggressive:   { rate: 100.10, label: '공격형',
+                    desc: '높은 사정률 — 고낙찰가 전략' },
+  },
+  recommendation: 'middle',
+  recommendation_reason: '최근 유사 공사 42건 중 23건이 99.94 ~ 100.03 구간에서 낙찰되었습니다.',
+};
+
+window.CAPTURE_SCHEMA = CAPTURE_SCHEMA;
+window.DEMO_CAPTURE = DEMO_CAPTURE;
+window.DEMO_ANALYSIS = DEMO_ANALYSIS;
