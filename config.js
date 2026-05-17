@@ -7,4 +7,4 @@
  *
  * 키(JODAL_API_KEY)는 여기 절대 넣지 말 것 — Worker secret 에만 존재.
  */
-window.PROXY_URL = "";
+window.PROXY_URL = "https://judal-proxy.3dleader0128.workers.dev";

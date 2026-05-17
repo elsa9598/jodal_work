@@ -171,6 +171,75 @@ function analyzeDistribution(rates, basePrice, lowerBound, biz, region) {
   };
 }
 
+// ── 서울 토목·포장 입찰공고 목록 (앱 notice 형태로 매핑) ──
+const SEOUL_KEYS = ['서울'];
+const WORK_KEYS = ['토목', '포장', '도로', '아스콘', '보도', '차도', '인도',
+                   '배수', '하수', '상수', '굴착복구'];
+
+function _daysLeft(s) {
+  const m = String(s || '').match(/(\d{4})-?(\d{2})-?(\d{2})/);
+  if (!m) return 0;
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  return Math.max(0, Math.round((d - new Date()) / 86400000));
+}
+function _statusOf(s) {
+  const dl = _daysLeft(s);
+  if (dl <= 0) return 'closed';
+  if (dl <= 3) return 'urgent';
+  return 'open';
+}
+
+async function fetchNoticeList(serviceKey) {
+  const end = new Date();
+  const begin = new Date();
+  begin.setDate(begin.getDate() - 20);
+  const out = [];
+  for (let page = 1; page <= 4; page++) {
+    const body = await callJodal(NOTICE_URL, {
+      serviceKey, pageNo: String(page), numOfRows: '100', type: 'json',
+      inqryDiv: '1',
+      inqryBgnDt: ymd(begin) + '0000', inqryEndDt: ymd(end) + '2359',
+    });
+    const list = asList(body);
+    for (const it of list) {
+      const region = (it.cnstrtsiteRgnNm || '') + ' ' +
+        (it.ntceInsttNm || '') + ' ' + (it.dminsttNm || '');
+      const name = it.bidNtceNm || '';
+      if (!SEOUL_KEYS.some((k) => region.includes(k))) continue;
+      if (!WORK_KEYS.some((k) => name.includes(k))) continue;
+      const presmpt = toNum(it.presmptPrce);
+      out.push({
+        id: 'L-' + (it.bidNtceNo || '') + '-' + (it.bidNtceOrd || '0'),
+        notice_no: it.bidNtceNo || '',
+        title: name,
+        agency: it.ntceInsttNm || '-',
+        demand: it.dminsttNm || it.ntceInsttNm || '-',
+        work: WORK_KEYS.find((k) => name.includes(k)) || '공사',
+        region: it.cnstrtsiteRgnNm || '서울특별시',
+        base_price: presmpt,
+        estimated: presmpt,
+        a_value: null,
+        pure_cost: null,
+        lower_rate: toNum(it.sucsfbidLwltRate) || 87.745,
+        rate_range: [97.0, 100.0],
+        license: it.indstrytyLmtYn === 'Y' ? '면허 제한 있음' : '공고 확인',
+        joint: it.cmmnSpldmdCorpRgnLmtYn === 'Y' ? '공동수급 지역제한' : '공고 확인',
+        method: it.cntrctCnclsMthdNm || '공고 확인',
+        bid_method: it.bidMethdNm || '전자입찰 / 적격심사',
+        deadline: (it.bidClseDt || '').slice(0, 16),
+        opening: (it.opengDt || '').slice(0, 16),
+        status: _statusOf(it.bidClseDt),
+        days_left: _daysLeft(it.bidClseDt),
+        flag: presmpt ? null : '기초금액 확인필요',
+        _real: true,
+      });
+    }
+    if (page * 100 >= toNum(body.totalCount)) break;
+  }
+  out.sort((a, b) => a.days_left - b.days_left);
+  return out;
+}
+
 export default {
   async fetch(request, env) {
     const origin = env.ALLOWED_ORIGIN || 'https://elsa9598.github.io';
@@ -179,8 +248,9 @@ export default {
     }
     const url = new URL(request.url);
     if (request.method !== 'POST' ||
-        (url.pathname !== '/analyze' && url.pathname !== '/notice')) {
-      return json({ error: 'POST /analyze 또는 /notice 만 지원합니다.' }, 404, origin);
+        (url.pathname !== '/analyze' && url.pathname !== '/notice' &&
+         url.pathname !== '/list')) {
+      return json({ error: 'POST /list, /notice, /analyze 만 지원합니다.' }, 404, origin);
     }
     if (!env.JODAL_API_KEY) {
       return json({ error: 'JODAL_API_KEY 미설정' }, 502, origin);
@@ -188,6 +258,17 @@ export default {
     let payload;
     try { payload = await request.json(); }
     catch { return json({ error: '잘못된 요청 본문' }, 400, origin); }
+
+    // ── 서울 토목·포장 공고 목록 ──
+    if (url.pathname === '/list') {
+      try {
+        const notices = await fetchNoticeList(env.JODAL_API_KEY);
+        return json({ notices, count: notices.length }, 200, origin);
+      } catch (e) {
+        return json({ error: '나라장터 목록 조회 실패: ' + (e?.message || e) },
+                    502, origin);
+      }
+    }
 
     // ── 공고 단독 조회 ──
     if (url.pathname === '/notice') {
