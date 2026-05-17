@@ -1,19 +1,11 @@
-// ocr.js — Real OCR via Claude vision (single-capture v2)
+// ocr.js — In-browser OCR via Tesseract.js (no server, no API key)
+//
+// 모바일/정적 배포에서 동작하도록 window.claude 의존을 제거하고
+// Tesseract.js(브라우저 내장 OCR)로 비드큐 캡처를 읽는다.
+// Tesseract는 한글+숫자 인식 정확도가 Claude보다 낮으므로,
+// 추출값은 "참고용 추정"이며 사용자가 검토 화면에서 수정하는 것을 전제로 한다.
 
-async function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => {
-      const result = String(r.result);
-      const idx = result.indexOf(',');
-      resolve(idx >= 0 ? result.slice(idx + 1) : result);
-    };
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
-}
-
-async function compressImage(file, maxSide = 1600, quality = 0.88) {
+async function compressImage(file, maxSide = 1800, quality = 0.9) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -42,86 +34,141 @@ async function compressImage(file, maxSide = 1600, quality = 0.88) {
   });
 }
 
-function parseOcrJson(text) {
-  if (!text) throw new Error('빈 응답');
-  let s = String(text).replace(/^[\s\S]*?```(?:json)?\s*/, '');
-  s = s.replace(/\s*```[\s\S]*$/, '').trim();
-  if (!s.startsWith('{')) {
-    const i = s.indexOf('{');
-    if (i < 0) throw new Error('JSON 없음: ' + text.slice(0, 120));
-    s = s.slice(i);
-  }
-  let depth = 0, inStr = false, esc = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (esc) { esc = false; continue; }
-    if (c === '\\' && inStr) { esc = true; continue; }
-    if (c === '"') inStr = !inStr;
-    if (inStr) continue;
-    if (c === '{') depth++;
-    else if (c === '}') {
-      depth--;
-      if (depth === 0) {
-        try { return JSON.parse(s.slice(0, i + 1)); }
-        catch (e) { throw new Error('JSON 파싱 실패: ' + e.message); }
+// 필드별 라벨 후보와 값 타입
+const FIELD_HINTS = {
+  notice_no:              { terms: ['공고번호', '공고 번호'],            type: 'text'   },
+  title:                  { terms: ['공고명', '공 고 명'],               type: 'text'   },
+  ordering_agency:        { terms: ['발주기관', '발주 기관'],            type: 'text'   },
+  demand_agency:          { terms: ['수요기관', '수요 기관'],            type: 'text'   },
+  business_type:          { terms: ['업종', '업 종'],                    type: 'text'   },
+  region_limit:           { terms: ['지역제한', '지역 제한', '지역'],    type: 'text'   },
+  deadline:               { terms: ['입찰마감일시', '입찰 마감일시', '입찰마감', '입찰 마감', '마감일시'], type: 'text' },
+  opening_datetime:       { terms: ['개찰일시', '개찰 일시', '개찰'],    type: 'text'   },
+  base_price:             { terms: ['기초금액', '기초 금액'],            type: 'amount' },
+  estimated_price:        { terms: ['추정가격', '추정 가격'],            type: 'amount' },
+  price_range:            { terms: ['예정가격범위', '예정가격 범위', '예정가격', '예가범위'], type: 'text' },
+  a_value:                { terms: ['A값', 'A 값', 'A값(원)'],           type: 'amount' },
+  pure_construction_cost: { terms: ['순공사원가', '순공사 원가', '순공사'], type: 'amount' },
+  lower_bound_rate:       { terms: ['낙찰하한율', '낙찰 하한율', '하한율'], type: 'rate' },
+  bid_rate_range:         { terms: ['투찰률범위', '투찰률 범위', '투찰률', '투찰율'], type: 'rate' },
+};
+
+// 라벨 텍스트 → 글자 사이 공백을 허용하는 정규식 (Tesseract가 한글 사이에
+// 공백을 자주 끼워 넣기 때문)
+function labelRegex(term) {
+  const esc = term.replace(/\s+/g, '').split('').map((ch) =>
+    ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+  ).join('\\s*');
+  return new RegExp(esc + '\\s*[:：)\\]]?\\s*(.*)');
+}
+
+// 숫자 필드에서 OCR이 흔히 틀리는 글자 보정
+const DIGIT_FIX = { O: '0', o: '0', D: '0', l: '1', I: '1', i: '1',
+                    S: '5', s: '5', B: '8', Z: '2', z: '2', g: '9',
+                    G: '6', b: '6', q: '9', T: '7' };
+
+function fixDigits(str) {
+  let changed = false;
+  const out = str.replace(/[OoDlIiSsBZzgGbqT]/g, (m) => {
+    if (DIGIT_FIX[m]) { changed = true; return DIGIT_FIX[m]; }
+    return m;
+  });
+  return { value: out, changed };
+}
+
+function extractAmount(rest) {
+  // "123,456,000원" 또는 "1억2,345만" 형태
+  let m = rest.match(/([0-9OoDlIiSsBZzgGbqT][0-9OoDlIiSsBZzgGbqT,.\s억만천]*)\s*원/);
+  if (!m) m = rest.match(/([0-9OoDlIiSsBZzgGbqT][0-9OoDlIiSsBZzgGbqT,.]{2,})/);
+  if (!m) return null;
+  return m[1].replace(/\s+/g, '').replace(/[.,]$/, '');
+}
+
+function extractRate(rest) {
+  const range = rest.match(
+    /([0-9OoSsBlI]{1,3}(?:\.[0-9OoSsBlI]+)?)\s*[~\-–]\s*([0-9OoSsBlI]{1,3}(?:\.[0-9OoSsBlI]+)?)/);
+  if (range) return range[1] + ' ~ ' + range[2];
+  const one = rest.match(/([0-9OoSsBlI]{1,3}(?:\.[0-9OoSsBlI]+)?)\s*%?/);
+  return one ? one[1] : null;
+}
+
+// Tesseract 원문 텍스트에서 스키마 필드들을 휴리스틱 추출
+function parseFieldsFromText(text, schema) {
+  const lines = String(text)
+    .split(/\r?\n/)
+    .map((l) => l.replace(/[|]+/g, ' ').replace(/\s{2,}/g, ' ').trim())
+    .filter(Boolean);
+
+  const extracted = {};
+  const corrections = [];
+
+  for (const f of schema.fields) {
+    const hint = FIELD_HINTS[f.key];
+    if (!hint) continue;
+
+    let rawVal = null;
+    for (const term of hint.terms) {
+      const re = labelRegex(term);
+      for (const line of lines) {
+        const m = line.match(re);
+        if (m && m[1] != null && m[1].trim()) { rawVal = m[1].trim(); break; }
       }
+      if (rawVal) break;
+    }
+    if (!rawVal) { extracted[f.key] = ''; continue; }
+
+    if (hint.type === 'amount') {
+      const amt = extractAmount(rawVal);
+      if (amt) {
+        const { value, changed } = fixDigits(amt);
+        if (changed) {
+          corrections.push({ field: f.key, from: amt, to: value,
+                             reason: 'OCR 숫자 글자 자동 보정' });
+        }
+        extracted[f.key] = value;
+      } else extracted[f.key] = '';
+    } else if (hint.type === 'rate') {
+      const r = extractRate(rawVal);
+      if (r) {
+        const { value, changed } = fixDigits(r);
+        if (changed) {
+          corrections.push({ field: f.key, from: r, to: value,
+                             reason: 'OCR 숫자 글자 자동 보정' });
+        }
+        extracted[f.key] = value;
+      } else extracted[f.key] = '';
+    } else {
+      extracted[f.key] = rawVal.replace(/[)\]]+$/, '').slice(0, 60).trim();
     }
   }
-  throw new Error('JSON 닫힘 없음');
+
+  return { extracted, corrections };
 }
 
-// Single-capture OCR — extracts all fields from one BidQ screenshot
-async function ocrSingleCapture(file, schema) {
+// 단일 캡처 OCR — Tesseract.js로 비드큐 화면에서 필드 추출
+async function ocrSingleCapture(file, schema, onProgress) {
+  if (typeof Tesseract === 'undefined') {
+    throw new Error('OCR 엔진(Tesseract.js)을 불러오지 못했습니다. 네트워크를 확인하세요.');
+  }
   const compressed = await compressImage(file);
-  const base64 = await fileToBase64(compressed);
-  const mediaType = compressed.type || 'image/jpeg';
 
-  const fieldsList = schema.fields.map((f) =>
-    `    "${f.key}": ""  // ${f.label}${f.unit ? ' [' + f.unit + ']' : ''}`,
-  ).join('\n');
-
-  const prompt =
-`이 이미지는 한국 조달청/비드큐(BidQ) 입찰 공고 화면입니다.
-이미지에서 보이는 텍스트를 정확히 읽고, 아래 항목들의 값을 추출하세요.
-
-JSON 객체 하나만 응답 (코드블록·설명·다른 텍스트 금지):
-{
-  "raw": "이미지에서 추출한 핵심 라벨·값들을 줄바꿈으로 나열한 OCR 원문 (배경 UI 생략)",
-  "extracted": {
-${fieldsList}
-  },
-  "corrections": [
-    // OCR이 헷갈리기 쉬운 글자(O↔0, l↔1, I↔1, S↔5, B↔8)를 자동 보정한 경우만 추가
-    // {"field":"키","from":"원문","to":"보정값","reason":"O를 0으로 보정"}
-  ]
-}
-
-규칙:
-- 숫자는 원본 표기 그대로 (콤마·원·% 포함 가능)
-- 화면에 없는 필드는 빈 문자열 ""
-- 추측 금지 — 보이는 것만 추출
-- raw는 핵심 라벨·값 중심 (전체 UI 텍스트를 다 옮길 필요 없음)`;
-
-  const response = await window.claude.complete({
-    messages: [{
-      role: 'user',
-      content: [
-        { type: 'image',
-          source: { type: 'base64', media_type: mediaType, data: base64 } },
-        { type: 'text', text: prompt },
-      ],
-    }],
+  const { data } = await Tesseract.recognize(compressed, 'kor+eng', {
+    logger: (msg) => {
+      if (onProgress && msg.status === 'recognizing text') {
+        onProgress(msg.progress);
+      }
+    },
   });
 
-  const parsed = parseOcrJson(response);
-  return {
-    raw: parsed.raw || '',
-    extracted: parsed.extracted || {},
-    corrections: Array.isArray(parsed.corrections) ? parsed.corrections : [],
-  };
+  const rawText = (data && data.text ? data.text : '').trim();
+  if (!rawText) {
+    throw new Error('이미지에서 글자를 인식하지 못했습니다. 더 선명한 캡처로 다시 시도하세요.');
+  }
+
+  const { extracted, corrections } = parseFieldsFromText(rawText, schema);
+  return { raw: rawText, extracted, corrections };
 }
 
-window.fileToBase64 = fileToBase64;
 window.compressImage = compressImage;
-window.parseOcrJson = parseOcrJson;
+window.parseFieldsFromText = parseFieldsFromText;
 window.ocrSingleCapture = ocrSingleCapture;

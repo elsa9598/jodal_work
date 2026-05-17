@@ -1,46 +1,16 @@
-// analysis.js — AI similar-work pattern analysis
+// analysis.js — 로컬 유사공사 패턴 추정 (서버·API 키 불필요)
 //
-// After OCR, this takes the finalized bid info and asks Claude to estimate
-// what similar 나라장터/조달청 historical tenders look like — count, average
-// rates, hot ranges, and 3-tier strategy recommendations.
-//
-// IMPORTANT: this is a SIMULATION. The model doesn't have live access to
-// 나라장터. We prompt it to produce plausible, internally-consistent
-// statistics that make the demo feel grounded. The result is clearly labeled
-// "AI 추정" in the UI.
+// 모바일/정적 배포에서 동작하도록 window.claude 의존을 제거하고,
+// 입력 공고 정보(기초금액·낙찰하한율)로부터 결정적(seeded) 통계 시뮬레이션을
+// 생성한다. 실제 나라장터 데이터가 아닌 "AI 추정"이며 UI에 그렇게 표기된다.
+// 같은 입력 → 같은 결과(재현 가능).
 
-function parseAnalysisJson(text) {
-  if (!text) throw new Error('빈 응답');
-  let s = String(text).replace(/^[\s\S]*?```(?:json)?\s*/, '');
-  s = s.replace(/\s*```[\s\S]*$/, '').trim();
-  if (!s.startsWith('{')) {
-    const i = s.indexOf('{');
-    if (i < 0) throw new Error('JSON 없음');
-    s = s.slice(i);
-  }
-  let depth = 0, inStr = false, esc = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (esc) { esc = false; continue; }
-    if (c === '\\' && inStr) { esc = true; continue; }
-    if (c === '"') inStr = !inStr;
-    if (inStr) continue;
-    if (c === '{') depth++;
-    else if (c === '}') {
-      depth--;
-      if (depth === 0) return JSON.parse(s.slice(0, i + 1));
-    }
-  }
-  throw new Error('JSON 닫힘 없음');
-}
-
-// Parse "123,456,000원" → 123456000
+// "123,456,000원" → 123456000
 function num(s) {
   if (s == null) return NaN;
   return Number(String(s).replace(/[^\d.-]/g, ''));
 }
 
-// Format a number into Korean readable range (e.g. "1억2천만")
 function rangeLabel(basePrice) {
   if (!basePrice || isNaN(basePrice)) return '범위 미상';
   const eok = Math.floor(basePrice / 100000000);
@@ -49,6 +19,17 @@ function rangeLabel(basePrice) {
   const hi = `${eok}억${cheonman < 9 ? (cheonman + 1) + '천만' : '9천만'}`;
   return lo + ' ~ ' + hi;
 }
+
+// 입력값으로 시드를 만들어 동일 입력엔 동일 난수열
+function seededRng(seed) {
+  let s = (Math.floor(seed) % 2147483647) || 12345;
+  return function () {
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+const round = (n, d) => Number(n.toFixed(d));
 
 async function runSimilarWorkAnalysis(finalValues) {
   const basePrice = num(finalValues.base_price);
@@ -60,64 +41,61 @@ async function runSimilarWorkAnalysis(finalValues) {
     throw new Error('기초금액 또는 낙찰하한율이 없어 유사공사 분석을 할 수 없습니다.');
   }
 
-  const prompt =
-`너는 한국 조달청·나라장터 입찰 분석가다. 다음 공고 정보를 보고
-유사 공사 낙찰 패턴을 "그럴듯한 시뮬레이션"으로 추정하라.
+  const rng = seededRng(basePrice + lowerBound * 1000);
 
-[입력 공고 정보]
-- 업종: ${businessType}
-- 지역: ${region}
-- 기초금액: ${basePrice.toLocaleString()}원
-- 낙찰하한율: ${lowerBound}%
+  // 평균 낙찰률: 하한율 ±0.3
+  const avgBidRate = round(lowerBound + (rng() - 0.5) * 0.6, 3);
+  // 평균 사정률: 100 ±0.4
+  const avgTargetRate = round(100 + (rng() - 0.5) * 0.8, 3);
+  // 사정률 집중 구간: 평균 ±0.1
+  const hotLow  = round(avgTargetRate - (0.05 + rng() * 0.05), 2);
+  const hotHigh = round(avgTargetRate + (0.05 + rng() * 0.05), 2);
+  const topRate = round(hotLow + (hotHigh - hotLow) * (0.4 + rng() * 0.2), 2);
 
-[규칙]
-- 실제 데이터가 아닌 통계 시뮬레이션이므로 그럴듯하고 일관성 있게 추정
-- 평균 낙찰률 (avg_bid_rate)은 ${lowerBound}% 근처(±0.3) 범위
-- 평균 사정률 (avg_target_rate)은 100% 근처(99.6~100.4) 범위
-- 사정률 집중 구간 (hot_range_low ~ hot_range_high)은 avg_target_rate를 중심으로 ±0.1 범위
-- top_rate는 hot_range 안의 한 값
-- 3가지 전략 사정률:
-  - conservative: hot_range_low - 0.05 ~ -0.10
-  - middle:       top_rate
-  - aggressive:   hot_range_high + 0.05 ~ +0.10
-- 추천 전략은 일반적으로 "middle" 또는 "conservative"
+  const similarCount = 35 + Math.floor(rng() * 31); // 35~65
+  const hotCount = Math.round(similarCount * (0.45 + rng() * 0.15));
 
-JSON 객체 하나만 응답 (코드블록·설명 금지):
-{
-  "similar_count": 35~65 사이의 정수,
-  "business_type": "${businessType}",
-  "region": "${region}",
-  "base_price_range": "예: 1억 ~ 1억5천만",
-  "avg_bid_rate": 숫자(소수점 3자리),
-  "avg_target_rate": 숫자(소수점 3자리),
-  "hot_range_low": 숫자(소수점 2자리),
-  "hot_range_high": 숫자(소수점 2자리),
-  "top_rate": 숫자(소수점 2자리),
-  "recent_trend": "1-2문장으로 최근 흐름 묘사",
-  "strategies": {
-    "conservative": {"rate": 숫자, "label": "보수형", "desc": "1문장 설명"},
-    "middle":       {"rate": 숫자, "label": "중간형", "desc": "1문장 설명"},
-    "aggressive":   {"rate": 숫자, "label": "공격형", "desc": "1문장 설명"}
-  },
-  "recommendation": "conservative 또는 middle 또는 aggressive",
-  "recommendation_reason": "왜 이 전략을 추천하는지 1-2문장"
-}`;
+  const strategies = {
+    conservative: {
+      rate: round(hotLow - (0.05 + rng() * 0.05), 2),
+      label: '보수형',
+      desc: '집중 구간보다 낮은 사정률 — 안정적 낙찰 가능성을 우선',
+    },
+    middle: {
+      rate: topRate,
+      label: '중간형',
+      desc: '집중 구간 중심값 — 낙찰 확률과 낙찰가의 균형',
+    },
+    aggressive: {
+      rate: round(hotHigh + (0.05 + rng() * 0.05), 2),
+      label: '공격형',
+      desc: '집중 구간보다 높은 사정률 — 고낙찰가를 노리는 전략',
+    },
+  };
 
-  const response = await window.claude.complete({
-    messages: [{ role: 'user', content: prompt }],
-  });
+  const recommendation = rng() < 0.6 ? 'middle' : 'conservative';
+  const recName = strategies[recommendation].label;
 
-  const parsed = parseAnalysisJson(response);
-
-  // Sanity-fill any missing fields so the UI doesn't crash.
-  parsed.business_type     = parsed.business_type     || businessType;
-  parsed.region            = parsed.region            || region;
-  parsed.base_price_range  = parsed.base_price_range  || rangeLabel(basePrice);
-  parsed.similar_count     = parsed.similar_count     || 40;
-  parsed.strategies        = parsed.strategies        || {};
-  parsed.recommendation    = parsed.recommendation    || 'middle';
-
-  return parsed;
+  return {
+    similar_count: similarCount,
+    business_type: businessType,
+    region,
+    base_price_range: rangeLabel(basePrice),
+    avg_bid_rate: avgBidRate,
+    avg_target_rate: avgTargetRate,
+    hot_range_low: hotLow,
+    hot_range_high: hotHigh,
+    top_rate: topRate,
+    recent_trend:
+      `최근 유사 공사에서 사정률이 ${hotLow} ~ ${hotHigh} 구간에 집중되는 ` +
+      `흐름이 관찰됩니다. (통계 추정)`,
+    strategies,
+    recommendation,
+    recommendation_reason:
+      `유사 공사 ${similarCount}건 중 약 ${hotCount}건이 ` +
+      `${hotLow} ~ ${hotHigh} 구간에서 낙찰되어 ${recName} 전략을 추천합니다.`,
+    estimated: true,
+  };
 }
 
 window.runSimilarWorkAnalysis = runSimilarWorkAnalysis;
