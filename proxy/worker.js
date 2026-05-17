@@ -207,7 +207,8 @@ function mapNotice(it) {
     title: name,
     agency: it.ntceInsttNm || '-',
     demand: it.dminsttNm || it.ntceInsttNm || '-',
-    work: WORK_KEYS.find((k) => name.includes(k)) || '공사',
+    work: WORK_KEYS.find((k) => name.includes(k)) || '기타',
+    civil: WORK_KEYS.some((k) => name.includes(k)),  // 토목·포장 계열 여부
     region: it.cnstrtsiteRgnNm || '서울특별시',
     base_price: presmpt,
     estimated: presmpt,
@@ -233,9 +234,10 @@ async function fetchNoticeList(serviceKey) {
     return LIST_CACHE.data;
   }
   // 최근 30일 게시분을 다수 페이지 병렬 스캔 → 서울·토목/포장·진행중만
+  // 최근 14일 게시분 (진행중 공고는 최신 게시에 몰림 — 창 좁혀 스캔효율↑)
   const end = new Date();
   const begin = new Date();
-  begin.setDate(begin.getDate() - 30);
+  begin.setDate(begin.getDate() - 14);
   const common = {
     serviceKey, numOfRows: '100', type: 'json', inqryDiv: '1',
     inqryBgnDt: ymd(begin) + '0000', inqryEndDt: ymd(end) + '2359',
@@ -262,8 +264,8 @@ async function fetchNoticeList(serviceKey) {
           (it.ntceInsttNm || '') + ' ' + (it.dminsttNm || '');
         const name = it.bidNtceNm || '';
         if (!SEOUL_KEYS.some((k) => region.includes(k))) continue;
-        if (!WORK_KEYS.some((k) => name.includes(k))) continue;
-        if (_statusOf(it.bidClseDt) === 'closed') continue; // 진행중만
+        // 서울 전체 공사 수집(토목·포장은 화면 필터로). 진행중만.
+        if (_statusOf(it.bidClseDt) === 'closed') continue;
         out.push(mapNotice(it));
       }
     }

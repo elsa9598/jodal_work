@@ -11,12 +11,14 @@ function ListScreen({ onOpenNotice, saved, onToggleSave }) {
   const [statusFilter, setStatusFilter] = useStateList('전체');
   const [sort, setSort] = useStateList('마감 임박순');
   const [q, setQ] = useStateList('');
+  const [civilOnly, setCivilOnly] = useStateList(true);  // 토목·포장만(기본 ON)
 
-  const works = ['전체', '도로포장', '아스콘포장', '보도블록정비', '차도정비', '인도정비', '하수도정비', '상수도정비', '굴착복구', '배수로정비', '토목공사'];
+  const works = ['전체', '토목', '포장', '도로', '아스콘', '보도', '차도', '인도', '배수', '하수', '상수', '굴착복구', '기타'];
   const statuses = ['전체', '정상 진행', '마감 임박', '마감 완료'];
 
   const filtered = useMemoList(() => {
     let xs = [...NOTICES];
+    if (civilOnly) xs = xs.filter(x => x.civil);
     if (workFilter !== '전체') xs = xs.filter(x => x.work === workFilter);
     if (statusFilter === '마감 임박') xs = xs.filter(x => x.status === 'urgent');
     if (statusFilter === '정상 진행') xs = xs.filter(x => x.status === 'open');
@@ -30,13 +32,13 @@ function ListScreen({ onOpenNotice, saved, onToggleSave }) {
     if (sort === '기초금액 낮은순') xs.sort((a, b) => a.base_price - b.base_price);
     if (sort === '최신 공고순') xs.sort((a, b) => b.notice_no.localeCompare(a.notice_no));
     return xs;
-  }, [workFilter, statusFilter, sort, q]);
+  }, [civilOnly, workFilter, statusFilter, sort, q]);
 
   return (
     <div className="fade-in">
       <window.UI.PageHead
         title="실시간 입찰 공고"
-        sub={`나라장터에서 수집된 서울시 관공서 토목·포장 공사 공고 ${NOTICES.length}건. 마감일·공종·기관별로 필터링하여 분석할 공고를 선택하세요.`}
+        sub={`나라장터 실시간 — 서울시 관공서 진행중 공사 ${NOTICES.length}건 수집. 기본은 토목·포장만 표시(아래 토글로 전체 공사 보기). 분석할 공고를 선택하세요.`}
         right={
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn"><Icon name="save" size={14}/> 내보내기</button>
@@ -58,6 +60,13 @@ function ListScreen({ onOpenNotice, saved, onToggleSave }) {
               style={{ paddingLeft: 34, width: '100%' }}
             />
           </div>
+          <button
+            className={'btn btn-sm' + (civilOnly ? ' btn-primary' : '')}
+            onClick={() => setCivilOnly(v => !v)}
+            title="토목·포장 계열만 / 서울 전체 공사"
+          >
+            {civilOnly ? '토목·포장만 ✓' : '전체 공사'}
+          </button>
           <Select value={workFilter} onChange={setWorkFilter} options={works} label="공종" />
           <Select value={statusFilter} onChange={setStatusFilter} options={statuses} label="상태" />
           <Select value={sort} onChange={setSort} options={['마감 임박순', '기초금액 높은순', '기초금액 낮은순', '최신 공고순']} label="정렬" />
