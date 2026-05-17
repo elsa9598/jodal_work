@@ -172,7 +172,10 @@ function analyzeDistribution(rates, basePrice, lowerBound, biz, region) {
 }
 
 // ── 서울 토목·포장 입찰공고 목록 (앱 notice 형태로 매핑) ──
-const SEOUL_KEYS = ['서울'];
+// 서울 = 리터럴 '서울' + 25개 자치구명 (자치구 공고는 기관명에 '서울' 미포함)
+const SEOUL_KEYS = ['서울', '강남', '서초', '송파', '강동', '마포', '영등포',
+  '용산', '성동', '광진', '동대문', '중랑', '성북', '강북', '도봉', '노원',
+  '은평', '서대문', '양천', '강서', '구로', '금천', '동작', '관악', '종로'];
 const WORK_KEYS = ['토목', '포장', '도로', '아스콘', '보도', '차도', '인도',
                    '배수', '하수', '상수', '굴착복구'];
 
@@ -189,67 +192,85 @@ function _statusOf(s) {
   return 'open';
 }
 
+// 모듈 캐시 (warm isolate 동안 유지 — 30분). 매 요청 130페이지 스캔 방지.
+let LIST_CACHE = { ts: 0, data: null };
+const LIST_TTL = 30 * 60 * 1000;
+const SCAN_PAGES = 20;     // 최근 게시 2,000건 스캔
+const BATCH = 5;           // 병렬 배치 크기
+
+function mapNotice(it) {
+  const name = it.bidNtceNm || '';
+  const presmpt = toNum(it.presmptPrce);
+  return {
+    id: 'L-' + (it.bidNtceNo || '') + '-' + (it.bidNtceOrd || '0'),
+    notice_no: it.bidNtceNo || '',
+    title: name,
+    agency: it.ntceInsttNm || '-',
+    demand: it.dminsttNm || it.ntceInsttNm || '-',
+    work: WORK_KEYS.find((k) => name.includes(k)) || '공사',
+    region: it.cnstrtsiteRgnNm || '서울특별시',
+    base_price: presmpt,
+    estimated: presmpt,
+    a_value: null,
+    pure_cost: null,
+    lower_rate: toNum(it.sucsfbidLwltRate) || 87.745,
+    rate_range: [97.0, 100.0],
+    license: it.indstrytyLmtYn === 'Y' ? '면허 제한 있음' : '공고 확인',
+    joint: it.cmmnSpldmdCorpRgnLmtYn === 'Y' ? '공동수급 지역제한' : '공고 확인',
+    method: it.cntrctCnclsMthdNm || '공고 확인',
+    bid_method: it.bidMethdNm || '전자입찰 / 적격심사',
+    deadline: (it.bidClseDt || '').slice(0, 16),
+    opening: (it.opengDt || '').slice(0, 16),
+    status: _statusOf(it.bidClseDt),
+    days_left: _daysLeft(it.bidClseDt),
+    flag: presmpt ? null : '기초금액 확인필요',
+    _real: true,
+  };
+}
+
 async function fetchNoticeList(serviceKey) {
-  // 조달청 API 는 조회기간(약 1개월) 한도가 있어 30일 청크 ×3 = 90일로 분할
+  if (LIST_CACHE.data && Date.now() - LIST_CACHE.ts < LIST_TTL) {
+    return LIST_CACHE.data;
+  }
+  // 최근 30일 게시분을 다수 페이지 병렬 스캔 → 서울·토목/포장·진행중만
+  const end = new Date();
+  const begin = new Date();
+  begin.setDate(begin.getDate() - 30);
+  const common = {
+    serviceKey, numOfRows: '100', type: 'json', inqryDiv: '1',
+    inqryBgnDt: ymd(begin) + '0000', inqryEndDt: ymd(end) + '2359',
+  };
   const out = [];
   const seen = {};
-  const CHUNK = 30, CHUNKS = 3;
-  for (let c = 0; c < CHUNKS; c++) {
-    const end = new Date();
-    end.setDate(end.getDate() - c * CHUNK);
-    const begin = new Date();
-    begin.setDate(begin.getDate() - (c + 1) * CHUNK);
-    for (let page = 1; page <= 3; page++) {
-      let body;
-      try {
-        body = await callJodal(NOTICE_URL, {
-          serviceKey, pageNo: String(page), numOfRows: '100', type: 'json',
-          inqryDiv: '1',
-          inqryBgnDt: ymd(begin) + '0000', inqryEndDt: ymd(end) + '2359',
-        });
-      } catch (e) { break; } // 한 청크 실패해도 나머지 진행
-      const list = asList(body);
-      if (!list.length) break;
+  for (let start = 1; start <= SCAN_PAGES; start += BATCH) {
+    const batch = [];
+    for (let p = start; p < start + BATCH && p <= SCAN_PAGES; p++) {
+      batch.push(
+        callJodal(NOTICE_URL, { ...common, pageNo: String(p) })
+          .then(asList).catch(() => []),
+      );
+    }
+    const results = await Promise.all(batch);
+    let empty = true;
+    for (const list of results) {
+      if (list.length) empty = false;
       for (const it of list) {
         const key = (it.bidNtceNo || '') + '-' + (it.bidNtceOrd || '0');
         if (seen[key]) continue;
         seen[key] = 1;
-      const region = (it.cnstrtsiteRgnNm || '') + ' ' +
-        (it.ntceInsttNm || '') + ' ' + (it.dminsttNm || '');
-      const name = it.bidNtceNm || '';
-      if (!SEOUL_KEYS.some((k) => region.includes(k))) continue;
-      if (!WORK_KEYS.some((k) => name.includes(k))) continue;
-      const presmpt = toNum(it.presmptPrce);
-      out.push({
-        id: 'L-' + (it.bidNtceNo || '') + '-' + (it.bidNtceOrd || '0'),
-        notice_no: it.bidNtceNo || '',
-        title: name,
-        agency: it.ntceInsttNm || '-',
-        demand: it.dminsttNm || it.ntceInsttNm || '-',
-        work: WORK_KEYS.find((k) => name.includes(k)) || '공사',
-        region: it.cnstrtsiteRgnNm || '서울특별시',
-        base_price: presmpt,
-        estimated: presmpt,
-        a_value: null,
-        pure_cost: null,
-        lower_rate: toNum(it.sucsfbidLwltRate) || 87.745,
-        rate_range: [97.0, 100.0],
-        license: it.indstrytyLmtYn === 'Y' ? '면허 제한 있음' : '공고 확인',
-        joint: it.cmmnSpldmdCorpRgnLmtYn === 'Y' ? '공동수급 지역제한' : '공고 확인',
-        method: it.cntrctCnclsMthdNm || '공고 확인',
-        bid_method: it.bidMethdNm || '전자입찰 / 적격심사',
-        deadline: (it.bidClseDt || '').slice(0, 16),
-        opening: (it.opengDt || '').slice(0, 16),
-        status: _statusOf(it.bidClseDt),
-        days_left: _daysLeft(it.bidClseDt),
-        flag: presmpt ? null : '기초금액 확인필요',
-        _real: true,
-      });
+        const region = (it.cnstrtsiteRgnNm || '') + ' ' +
+          (it.ntceInsttNm || '') + ' ' + (it.dminsttNm || '');
+        const name = it.bidNtceNm || '';
+        if (!SEOUL_KEYS.some((k) => region.includes(k))) continue;
+        if (!WORK_KEYS.some((k) => name.includes(k))) continue;
+        if (_statusOf(it.bidClseDt) === 'closed') continue; // 진행중만
+        out.push(mapNotice(it));
       }
-      if (page * 100 >= toNum(body.totalCount)) break;
     }
+    if (empty) break; // 더 이상 데이터 없음
   }
   out.sort((a, b) => a.days_left - b.days_left);
+  LIST_CACHE = { ts: Date.now(), data: out };
   return out;
 }
 
