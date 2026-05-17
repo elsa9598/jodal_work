@@ -1,9 +1,10 @@
-// config.js — judal 런타임 설정
-//
-// PROXY_URL: Cloudflare Worker 프록시 주소.
-//   - 비워두면("") 프록시 미사용 → 로컬 통계 추정으로 동작 (서버 0)
-//   - 배포 후 wrangler가 출력하는 주소를 넣으면 조달청 실데이터 분석 활성화
-//     예) "https://judal-proxy.your-account.workers.dev"
-//
-// 공개 repo이므로 여기엔 절대 API 키를 넣지 말 것 (키는 Worker secret 에만).
-window.JUDAL_PROXY_URL = "";
+/* config.js — 런타임 설정 (공개 파일: API 키 절대 금지)
+ *
+ * PROXY_URL: 배포한 Cloudflare Worker 프록시 주소.
+ *   - 빈 문자열 ""  → 데모 데이터로 동작 (키·서버 불필요, 월 0원)
+ *   - 배포 후 "https://judal-proxy.<계정>.workers.dev" 넣으면
+ *     조달청 실데이터(서울 토목·포장 공고 + 낙찰 투찰률 실분포) 자동 전환
+ *
+ * 키(JODAL_API_KEY)는 여기 절대 넣지 말 것 — Worker secret 에만 존재.
+ */
+window.PROXY_URL = "";
