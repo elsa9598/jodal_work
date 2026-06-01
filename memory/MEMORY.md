@@ -51,15 +51,15 @@
 ## 2026-06-02 낙찰 알림 자동화
 
 - 자동화 ID: `10-pdf`.
-- 자동화 이름: `서울 토목·포장 10억 이하 공고 PDF 메일`.
+- 자동화 이름: `서울 토목·포장 5억 이하 공고 PDF 메일`.
 - 실행 시각: 매일 오전 10시.
 - 실행 위치: `D:\Claude_works\nakchal`.
-- 조건: 서울 토목·포장 계열(`civil=true`), 진행중(`status != "closed"`), 기초금액 10억 원 이하.
+- 조건: 서울 토목·포장 계열(`civil=true`), 진행중(`status != "closed"`), 기초금액 5억 원 이하.
 - 데이터 소스: Cloudflare Worker `https://judal-proxy.3dleader0128.workers.dev/list`.
 - 메일 발송: `D:\.env`의 `RESEND_API_KEY`를 사용하고 수신자는 `ALERT_EMAIL`, `RESEND_TO_EMAIL`, `TO_EMAIL` 순서로 찾는다. 키/시크릿 값은 출력 금지.
 - 새 공고가 있으면 `reports/YYYY-MM-DD_공고번호_입찰요약.pdf`를 만들고 Resend로 Gmail에 발송한다.
-- 새 공고가 없어도 `[입찰 알림] 오늘은 서울 토목·포장 10억 이하 새 공고 없음` 메일을 발송한다.
-- 중복 방지: `memory/seen-under-1b-notices.json`에 발송 완료 공고번호를 기록한다.
+- 새 공고가 없어도 `[입찰 알림] 오늘은 서울 토목·포장 5억 이하 새 공고 없음` 메일을 발송한다.
+- 중복 방지: `memory/seen-under-500m-notices.json`에 발송 완료 공고번호를 기록한다.
 - 노트북 방식 자동화라 매일 10시에 노트북 전원, 인터넷, Codex 자동화 실행 환경이 켜져 있어야 한다.
 
 ## 작업 운영 메모
