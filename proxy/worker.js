@@ -29,6 +29,8 @@
 
 const NOTICE_URL =
   'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwk';
+const BASIS_URL =
+  'https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoCnstwkBsisAmount';
 const OPENG_URL =
   'https://apis.data.go.kr/1230000/as/ScsbidInfoService/getOpengResultListInfoCnstwkPPSSrch';
 
@@ -49,6 +51,12 @@ const json = (obj, status, origin) =>
 
 const toNum = (s) => Number(String(s ?? '').replace(/[^\d.-]/g, ''));
 const round = (n, d) => Number(Number(n).toFixed(d));
+function baseAmountFromNoticeItem(it, basis) {
+  if (basis?.base_price) return basis.base_price;
+  const presmpt = toNum(it.presmptPrce);
+  const vat = toNum(it.VAT ?? it.vat);
+  return presmpt && vat ? presmpt + vat : presmpt;
+}
 
 function rangeLabel(basePrice) {
   if (!basePrice || isNaN(basePrice)) return '범위 미상';
@@ -87,26 +95,78 @@ async function callJodal(url, params) {
 async function fetchNotice(serviceKey, noticeNo) {
   const bidNo = String(noticeNo).trim().replace(/\s+/g, '');
   if (!bidNo) return null;
-  const body = await callJodal(NOTICE_URL, {
-    serviceKey, pageNo: '1', numOfRows: '5', type: 'json',
-    inqryDiv: '2', bidNtceNo: bidNo,
-  });
-  const list = asList(body);
+  const [noticeBody, basis] = await Promise.all([
+    callJodal(NOTICE_URL, {
+      serviceKey, pageNo: '1', numOfRows: '5', type: 'json',
+      inqryDiv: '2', bidNtceNo: bidNo,
+    }),
+    fetchBasisAmount(serviceKey, bidNo).catch(() => null),
+  ]);
+  const list = asList(noticeBody);
   if (!list.length) return null;
   const it = list[0];
   const presmpt = toNum(it.presmptPrce);
+  const base = baseAmountFromNoticeItem(it, basis);
   return {
     notice_no: it.bidNtceNo ?? bidNo,
     title: it.bidNtceNm ?? '',
     ordering_agency: it.ntceInsttNm ?? '',
     demand_agency: it.dminsttNm ?? '',
     region_limit: it.cnstrtsiteRgnNm ?? '',
-    base_price: presmpt,        // 추정가격(공고 공식값)
+    base_price: base,
     estimated_price: presmpt,
+    a_value: basis?.a_value ?? null,
+    pure_cost: basis?.pure_cost ?? null,
     lower_bound_rate: toNum(it.sucsfbidLwltRate),
+    rate_range: basis?.rate_range || [97, 103],
     deadline: it.bidClseDt ?? '',
     opening_datetime: it.opengDt ?? '',
-    source: '나라장터 입찰공고정보 OpenAPI',
+    source: basis?.source || '나라장터 입찰공고정보 OpenAPI',
+  };
+}
+
+function calcAValue(it) {
+  const keys = [
+    'mrfnHealthInsrprm',      // 국민건강보험료
+    'npnInsrprm',             // 국민연금보험료
+    'odsnLngtrmrcprInsrprm',  // 노인장기요양보험료
+    'rtrfundNon',             // 퇴직공제부금비
+    'sftyMngcst',             // 산업안전보건관리비
+    'sftyChckMngcst',         // 안전관리비
+    'qltyMngcst',             // 품질관리비
+    'envCnsrvcst',            // 환경보전비
+    'scontrctPayprcePayGrntyFee', // 하도급대금지급보증수수료
+  ];
+  const sum = keys.reduce((s, k) => s + (toNum(it[k]) || 0), 0);
+  return sum || null;
+}
+
+async function fetchBasisAmount(serviceKey, noticeNo) {
+  const bidNo = String(noticeNo || '').trim().replace(/\s+/g, '');
+  if (!bidNo) return null;
+  const end = new Date();
+  end.setDate(end.getDate() + 30);
+  const begin = new Date();
+  begin.setDate(begin.getDate() - 365);
+  const body = await callJodal(BASIS_URL, {
+    serviceKey, pageNo: '1', numOfRows: '5', type: 'json',
+    inqryDiv: '2',
+    inqryBgnDt: ymd(begin) + '0000',
+    inqryEndDt: ymd(end) + '2359',
+    bidNtceNo: bidNo,
+  });
+  const list = asList(body);
+  if (!list.length) return null;
+  const it = list.find((x) => String(x.bidNtceNo || '') === bidNo) || list[0];
+  const lo = toNum(it.rsrvtnPrceRngBgnRate);
+  const hi = toNum(it.rsrvtnPrceRngEndRate);
+  return {
+    base_price: toNum(it.bssamt),
+    pure_cost: toNum(it.bssAmtPurcnstcst) || null,
+    a_value: calcAValue(it),
+    rate_range: lo && hi ? [lo, hi] : null,
+    basis_open_dt: it.bssamtOpenDt || '',
+    source: '나라장터 입찰공고정보 OpenAPI + 공사기초금액정보',
   };
 }
 
@@ -201,6 +261,7 @@ const BATCH = 5;           // 병렬 배치 크기
 function mapNotice(it) {
   const name = it.bidNtceNm || '';
   const presmpt = toNum(it.presmptPrce);
+  const base = baseAmountFromNoticeItem(it, null);
   return {
     id: 'L-' + (it.bidNtceNo || '') + '-' + (it.bidNtceOrd || '0'),
     notice_no: it.bidNtceNo || '',
@@ -210,12 +271,12 @@ function mapNotice(it) {
     work: WORK_KEYS.find((k) => name.includes(k)) || '기타',
     civil: WORK_KEYS.some((k) => name.includes(k)),  // 토목·포장 계열 여부
     region: it.cnstrtsiteRgnNm || '서울특별시',
-    base_price: presmpt,
+    base_price: base,
     estimated: presmpt,
     a_value: null,
     pure_cost: null,
     lower_rate: toNum(it.sucsfbidLwltRate) || 87.745,
-    rate_range: [97.0, 100.0],
+    rate_range: [97.0, 103.0],
     license: it.indstrytyLmtYn === 'Y' ? '면허 제한 있음' : '공고 확인',
     joint: it.cmmnSpldmdCorpRgnLmtYn === 'Y' ? '공동수급 지역제한' : '공고 확인',
     method: it.cntrctCnclsMthdNm || '공고 확인',
@@ -228,6 +289,30 @@ function mapNotice(it) {
     flag: presmpt ? null : '기초금액 확인필요',
     _real: true,
   };
+}
+
+function applyBasisToNotice(notice, basis) {
+  if (!basis) return notice;
+  return {
+    ...notice,
+    base_price: basis.base_price || notice.base_price,
+    a_value: basis.a_value ?? notice.a_value,
+    pure_cost: basis.pure_cost ?? notice.pure_cost,
+    rate_range: basis.rate_range || notice.rate_range,
+    basis_open_dt: basis.basis_open_dt || '',
+  };
+}
+
+async function hydrateBasisForNotices(serviceKey, notices) {
+  const out = [];
+  for (let start = 0; start < notices.length; start += BATCH) {
+    const chunk = notices.slice(start, start + BATCH);
+    const basisList = await Promise.all(
+      chunk.map((n) => fetchBasisAmount(serviceKey, n.notice_no).catch(() => null)),
+    );
+    chunk.forEach((n, i) => out.push(applyBasisToNotice(n, basisList[i])));
+  }
+  return out;
 }
 
 // ── 새 토목·포장 공고 알리미 (Cron) ──
@@ -327,8 +412,9 @@ async function fetchNoticeList(serviceKey) {
     if (empty) break; // 더 이상 데이터 없음
   }
   out.sort((a, b) => a.days_left - b.days_left);
-  LIST_CACHE = { ts: Date.now(), data: out };
-  return out;
+  const hydrated = await hydrateBasisForNotices(serviceKey, out);
+  LIST_CACHE = { ts: Date.now(), data: hydrated };
+  return hydrated;
 }
 
 export default {

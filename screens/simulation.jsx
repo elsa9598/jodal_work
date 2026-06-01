@@ -16,7 +16,7 @@ function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
     );
   }
 
-  const sim = useMemoS(() => makeSimilar(notice.id), [notice]);
+  const sim = makeSimilar(notice.id);
 
   const consRate = sim.concentrated_range[0];
   const balRate = +sim.avg_adj.toFixed(2);

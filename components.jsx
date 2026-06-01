@@ -165,6 +165,17 @@ function NoticeCard({ notice, onOpen, compact = false, saved = false, onToggleSa
 
 // ---------- Bar chart (사정률 분포) ----------
 function BucketBars({ buckets, highlight, accent }) {
+  if (!buckets || !buckets.length) {
+    return (
+      <div className="muted" style={{
+        height: 160, display: 'grid', placeItems: 'center',
+        border: '1px dashed var(--line)', borderRadius: 10,
+        fontSize: 12,
+      }}>
+        분석 분포 데이터 대기 중
+      </div>
+    );
+  }
   const max = Math.max(...buckets.map(b => b.count));
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 160 }}>

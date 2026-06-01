@@ -10,7 +10,7 @@ function AnalysisScreen({ notice, onGo }) {
   const [period, setPeriod] = useStateA('6개월');
   const [scope, setScope] = useStateA('동일 공종');
 
-  const sim = useMemoA(() => notice ? makeSimilar(notice.id) : null, [notice]);
+  const sim = notice ? makeSimilar(notice.id) : null;
 
   if (!notice || !sim) {
     return (

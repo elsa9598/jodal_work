@@ -5,9 +5,11 @@ function HomeScreen({ onGo, onOpenNotice, saved, onToggleSave }) {
   const { NOTICES, fmt, fmt억 } = window.APP_DATA;
   const { Icon, NoticeCard } = window.UI;
 
-  const today = NOTICES.filter(n => n.days_left <= 3 && n.status !== 'closed');
-  const open = NOTICES.filter(n => n.status !== 'closed');
-  const recent = NOTICES.slice(0, 4);
+  const civilNotices = NOTICES.filter(n => n.civil);
+  const viewNotices = civilNotices.length ? civilNotices : NOTICES;
+  const today = viewNotices.filter(n => n.days_left <= 3 && n.status !== 'closed');
+  const open = viewNotices.filter(n => n.status !== 'closed');
+  const recent = viewNotices.slice(0, 4);
 
   // KPI counts by work
   const byWork = {};
@@ -62,9 +64,9 @@ function HomeScreen({ onGo, onOpenNotice, saved, onToggleSave }) {
             <div style={{ fontSize: 11, color: 'var(--ink-low)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               오늘의 추천 공고
             </div>
-            {NOTICES[0] ? (
+            {viewNotices[0] ? (
             <div
-              onClick={() => onOpenNotice(NOTICES[0])}
+              onClick={() => onOpenNotice(viewNotices[0])}
               style={{
                 padding: 16, borderRadius: 14,
                 background: 'rgba(0,0,0,0.35)',
@@ -73,15 +75,15 @@ function HomeScreen({ onGo, onOpenNotice, saved, onToggleSave }) {
               }}
             >
               <div style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 700, marginBottom: 6 }}>실시간 · 마감 임박순 1순위</div>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8, lineHeight: 1.4 }}>{NOTICES[0].title}</div>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8, lineHeight: 1.4 }}>{viewNotices[0].title}</div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--ink-mid)' }}>
-                <span>{NOTICES[0].agency}</span>
-                <span className="tnum">D-{NOTICES[0].days_left}</span>
+                <span>{viewNotices[0].agency}</span>
+                <span className="tnum">D-{viewNotices[0].days_left}</span>
               </div>
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--line)', fontSize: 12 }}>
                 <span className="muted">기초금액 · </span>
                 <span className="tnum strong" style={{ color: 'var(--accent)' }}>
-                  {fmt(NOTICES[0].base_price)} 원
+                  {fmt(viewNotices[0].base_price)} 원
                 </span>
               </div>
             </div>
@@ -116,7 +118,7 @@ function HomeScreen({ onGo, onOpenNotice, saved, onToggleSave }) {
               <div style={{ fontSize: 17, fontWeight: 700, marginTop: 6 }}>최신 입찰 공고</div>
             </div>
             <button className="btn btn-sm btn-ghost" onClick={() => onGo('list')}>
-              전체 {NOTICES.length}건 보기 <Icon name="arrowRight" size={14}/>
+              전체 {viewNotices.length}건 보기 <Icon name="arrowRight" size={14}/>
             </button>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

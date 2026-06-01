@@ -52,6 +52,79 @@ async function fetchSimilar(notice) {
   return null; // 데모 fallback (screens 에서 makeSimilar 사용)
 }
 
+function _bidRateToAdj(rate, lower) {
+  const n = Number(rate);
+  const l = Number(lower);
+  if (!n || !l) return 0;
+  return +(n / l * 100).toFixed(3);
+}
+
+function _bucketRange(v) {
+  return `${(v - 0.01).toFixed(2)}~${(v + 0.01).toFixed(2)}`;
+}
+
+function _fallbackBuckets(low, mid, high, total) {
+  const n = Math.max(8, Number(total) || 20);
+  const pts = [low - 0.04, low - 0.02, low, mid, high, high + 0.02, high + 0.04]
+    .filter((v, i, a) => Number.isFinite(v) && a.indexOf(v) === i)
+    .sort((a, b) => a - b);
+  return pts.map((v, i) => ({
+    range: _bucketRange(v),
+    count: Math.max(1, Math.round(n * ([0.08, 0.12, 0.2, 0.28, 0.18, 0.1, 0.04][i] || 0.06))),
+  }));
+}
+
+function normalizeSimilar(real, fallback, notice) {
+  if (!real) return fallback;
+  if (real.avg_success != null && real.avg_adj != null) {
+    return Object.assign({}, fallback, real);
+  }
+
+  const lower = notice.lower_rate || notice.lower_bound_rate;
+  const total = real.similar_count || real.sample_count || fallback.total || 0;
+  const consBid = real.strategies?.conservative?.rate || real.hot_range_low || real.avg_bid_rate || 0;
+  const midBid = real.strategies?.middle?.rate || real.top_rate || real.avg_bid_rate || 0;
+  const aggBid = real.strategies?.aggressive?.rate || real.hot_range_high || real.avg_bid_rate || 0;
+  const lowAdj = _bidRateToAdj(real.hot_range_low || consBid, lower);
+  const midAdj = _bidRateToAdj(midBid, lower);
+  const highAdj = _bidRateToAdj(real.hot_range_high || aggBid, lower);
+  const avgAdj = _bidRateToAdj(real.avg_bid_rate || midBid, lower);
+
+  return Object.assign({}, fallback, {
+    total,
+    region: real.region || fallback.region,
+    work_label: real.business_type || notice.work || fallback.work_label,
+    base_range: real.base_price_range || fallback.base_range,
+    avg_success: real.avg_bid_rate || midBid,
+    min_success: consBid,
+    max_success: aggBid,
+    median_success: real.top_rate || midBid,
+    avg_adj: avgAdj || midAdj,
+    concentrated_range: [lowAdj || midAdj, highAdj || midAdj],
+    most_common_range: [lowAdj || midAdj, highAdj || midAdj],
+    avg_competition: real.avg_competition || fallback.avg_competition,
+    recent_trend: real.recent_trend || fallback.recent_trend,
+    strategy: real.recommendation_reason || real.recommendation || fallback.strategy,
+    buckets: real.buckets && real.buckets.length
+      ? real.buckets
+      : _fallbackBuckets(lowAdj || midAdj, midAdj || avgAdj, highAdj || midAdj, total),
+    strategies: {
+      conservative: Object.assign({}, fallback.strategies.conservative, real.strategies?.conservative, {
+        rate: _bidRateToAdj(consBid, lower),
+      }),
+      middle: Object.assign({}, fallback.strategies.middle, real.strategies?.middle, {
+        rate: midAdj || avgAdj,
+      }),
+      aggressive: Object.assign({}, fallback.strategies.aggressive, real.strategies?.aggressive, {
+        rate: _bidRateToAdj(aggBid, lower),
+      }),
+    },
+    estimated: !!real.estimated,
+    source: real.source || fallback.source,
+    notice_verified: real.notice_verified,
+  });
+}
+
 window.JodalLive = {
   get enabled() { return !!_proxyBase(); },
   fetchNotices,
@@ -78,7 +151,7 @@ window.JodalLive = {
       fetchSimilar(notice).then((real) => {
         if (real) {
           // 화면 buckets/필드 형태에 맞춰 병합 (데모 골격 + 실수치)
-          simCache[noticeId] = Object.assign({}, demoMakeSimilar(noticeId), real);
+          simCache[noticeId] = normalizeSimilar(real, demoMakeSimilar(noticeId), notice);
           window.dispatchEvent(new CustomEvent('jodal:update'));
         }
       }).catch(() => {}).finally(() => { pending[noticeId] = false; });
