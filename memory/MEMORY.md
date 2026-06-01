@@ -69,3 +69,11 @@
 - GitHub 계정은 `elsa9598`.
 - `D:\.env`에 GitHub 푸시용 키가 있어도 Git은 `.env`를 자동으로 읽지 않는다. 이 폴더는 로컬 Git 설정의 `credential.helper`를 `C:/Users/3dlea/.artbook-git-cred.sh`로 지정해서 `.env`의 키를 읽게 한다.
 - GitHub 인증/허가 박스가 다시 뜨면 `git config --get credential.helper`가 위 헬퍼인지 먼저 확인한다.
+- 모바일 원격 지시가 인증창에서 멈추지 않도록 이 저장소 로컬 Git 설정은 시스템 `manager`를 빈 헬퍼로 리셋한 뒤 전용 헬퍼만 쓰게 한다. 설정값:
+  - `credential.helper = ""`
+  - `credential.helper = C:/Users/3dlea/.artbook-git-cred.sh`
+  - `core.askPass = D:/Claude_works/nakchal/scripts/git-no-askpass.bat`
+  - `credential.modalPrompt = false`
+  - `credential.interactive = never`
+  - `credential.useHttpPath = true`
+- 위 설정 후 `$env:GIT_TERMINAL_PROMPT='0'; git push --dry-run origin main` 통과 확인.
