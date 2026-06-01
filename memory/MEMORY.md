@@ -66,3 +66,6 @@
 
 - 이 낙찰 프로젝트에서는 메모, 자동화 설정 변경, 코드 변경처럼 보존 가치가 있는 작업을 하면 커밋·푸시까지 이어서 진행한다.
 - 단, `.env`, API 키, 토큰, 시크릿 값은 절대 커밋하지 않는다.
+- GitHub 계정은 `elsa9598`.
+- `D:\.env`에 GitHub 푸시용 키가 있어도 Git은 `.env`를 자동으로 읽지 않는다. 이 폴더는 로컬 Git 설정의 `credential.helper`를 `C:/Users/3dlea/.artbook-git-cred.sh`로 지정해서 `.env`의 키를 읽게 한다.
+- GitHub 인증/허가 박스가 다시 뜨면 `git config --get credential.helper`가 위 헬퍼인지 먼저 확인한다.
