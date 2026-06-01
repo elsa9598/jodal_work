@@ -61,6 +61,74 @@ function fmt억(n) {
 function calcBid(base, adj, lower) {
   return Math.round(base * (adj / 100) * (lower / 100));
 }
+function getRecommendedBid(notice, sim) {
+  if (!notice) return null;
+  const lo = Number(notice.rate_range && notice.rate_range[0]) || 97;
+  const hi = Number(notice.rate_range && notice.rate_range[1]) || 103;
+  const mid = (lo + hi) / 2;
+  const pickRate = (v, fallback) => {
+    const n = Number(v);
+    return n > 0 ? n : fallback;
+  };
+  const strategies = sim && sim.strategies ? sim.strategies : {};
+  const consRate = pickRate(strategies.conservative && strategies.conservative.rate,
+    pickRate(sim && sim.concentrated_range && sim.concentrated_range[0], Math.max(lo, mid - 0.04)));
+  const middleRate = pickRate(strategies.middle && strategies.middle.rate,
+    pickRate(sim && sim.avg_adj, mid));
+  const aggRate = pickRate(strategies.aggressive && strategies.aggressive.rate,
+    pickRate(sim && sim.concentrated_range && sim.concentrated_range[1], Math.min(hi, mid + 0.04)));
+
+  const rawKey = (sim && sim.recommendation_key) || 'middle';
+  const key = rawKey === 'conservative' || rawKey === 'aggressive' ? rawKey : 'middle';
+  const candidates = {
+    conservative: {
+      key: 'conservative',
+      uiKey: 'conservative',
+      label: '안정형',
+      desc: '낙찰 하위권 투찰률 기준',
+      rate: consRate,
+      price: calcBid(notice.base_price, consRate, notice.lower_rate),
+    },
+    middle: {
+      key: 'middle',
+      uiKey: 'balanced',
+      label: '추천형',
+      desc: '실낙찰 집중 구간 기준',
+      rate: middleRate,
+      price: calcBid(notice.base_price, middleRate, notice.lower_rate),
+    },
+    aggressive: {
+      key: 'aggressive',
+      uiKey: 'aggressive',
+      label: '공격형',
+      desc: '낙찰 상위권 투찰률 기준',
+      rate: aggRate,
+      price: calcBid(notice.base_price, aggRate, notice.lower_rate),
+    },
+  };
+  const selected = candidates[key];
+  const total = Number(sim && (sim.total || sim.sample_count || sim.similar_count)) || 0;
+  const confidence = total >= 30 && sim && sim.estimated === false ? '높음'
+    : total >= 8 ? '보통'
+    : '대기';
+  const bidRate = notice.base_price ? +(selected.price / notice.base_price * 100).toFixed(3) : 0;
+  return {
+    key,
+    uiKey: selected.uiKey,
+    label: selected.label,
+    desc: selected.desc,
+    rate: selected.rate,
+    price: selected.price,
+    bidRate,
+    total,
+    confidence,
+    source: sim && sim.source ? sim.source : '실데이터 분석 대기',
+    reason: sim && (sim.recommendation_reason || sim.strategy || sim.recent_trend)
+      ? (sim.recommendation_reason || sim.strategy || sim.recent_trend)
+      : '공고를 선택하면 조달청 실데이터 기반으로 추천 금액을 계산합니다.',
+    candidates,
+  };
+}
 function statusLabel(s) {
   if (s === 'urgent') return { label: '마감 임박', cls: 'badge-warn' };
   if (s === 'closed') return { label: '마감 완료', cls: 'badge-mute' };
@@ -70,5 +138,5 @@ function statusLabel(s) {
 
 window.APP_DATA = {
   AGENCIES, WORK_TYPES, NOTICES, MY_HISTORY,
-  makeSimilar, fmt, fmtKRW, fmt억, calcBid, statusLabel,
+  makeSimilar, fmt, fmtKRW, fmt억, calcBid, getRecommendedBid, statusLabel,
 };

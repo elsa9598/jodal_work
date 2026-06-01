@@ -2,7 +2,7 @@
 // Screen 3 — 공고 상세
 
 function DetailScreen({ notice, onGo, saved, onToggleSave }) {
-  const { fmt, fmtKRW, fmt억, calcBid, statusLabel } = window.APP_DATA;
+  const { fmt, fmtKRW, fmt억, calcBid, makeSimilar, getRecommendedBid, statusLabel } = window.APP_DATA;
   const { Icon } = window.UI;
 
   if (!notice) {
@@ -16,11 +16,16 @@ function DetailScreen({ notice, onGo, saved, onToggleSave }) {
 
   const st = statusLabel(notice.status);
   const isSaved = saved.has(notice.id);
+  const sim = makeSimilar(notice.id);
+  const rec = getRecommendedBid(notice, sim);
 
   // quick preview of bid candidates
-  const cons = calcBid(notice.base_price, notice.rate_range[0] + 0.04, notice.lower_rate); // 보수
-  const bal = calcBid(notice.base_price, 99.982, notice.lower_rate);                        // 중간
-  const agg = calcBid(notice.base_price, notice.rate_range[1] - 0.02, notice.lower_rate);   // 공격
+  const consRate = rec.candidates.conservative.rate;
+  const balRate = rec.candidates.middle.rate;
+  const aggRate = rec.candidates.aggressive.rate;
+  const cons = rec.candidates.conservative.price;
+  const bal = rec.candidates.middle.price;
+  const agg = rec.candidates.aggressive.price;
 
   // 예정가격 범위
   const priceLow = Math.round(notice.base_price * (notice.rate_range[0] / 100));
@@ -131,20 +136,39 @@ function DetailScreen({ notice, onGo, saved, onToggleSave }) {
 
         {/* RIGHT — pre-analysis preview */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Quick candidates */}
+          {/* Quick recommendation */}
           <div className="card" style={{
             background: 'linear-gradient(180deg, rgba(79,140,255,0.06), var(--surface))',
             border: '1px solid var(--accent-line)',
           }}>
-            <div className="kicker"><span className="bar"></span>AI 사전 추정</div>
-            <div style={{ fontSize: 16, fontWeight: 700, marginTop: 6, marginBottom: 4 }}>예상 투찰 후보 (3안)</div>
+            <div className="kicker"><span className="bar"></span>픽 추천</div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginTop: 6, marginBottom: 4 }}>낙찰 가능성 높은 후보 금액</div>
             <div className="muted" style={{ fontSize: 11.5, marginBottom: 14 }}>
-              과거 유사 공사 42건의 사정률 패턴 기반 · 시뮬레이션 화면에서 슬라이더로 조정 가능
+              조달청 실낙찰 데이터의 집중 투찰률을 현재 공고 기초금액에 대입한 참고값입니다.
             </div>
 
-            <CandidateRow label="보수형" sub="사정률 99.94%" value={cons} tone="mute" />
-            <CandidateRow label="중간형" sub="사정률 99.98% · 권장" value={bal} tone="accent" featured />
-            <CandidateRow label="공격형" sub="사정률 100.03%" value={agg} tone="warn" />
+            <div style={{ padding: 16, borderRadius: 12, background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                <div>
+                  <div className="muted" style={{ fontSize: 11.5 }}>추천 전략 · {rec.label}</div>
+                  <div className="tnum" style={{ fontSize: 28, fontWeight: 800, color: 'var(--accent)', marginTop: 4 }}>
+                    {fmt(rec.price)}<span style={{ fontSize: 14, color: 'var(--ink-mid)', fontWeight: 600 }}>원</span>
+                  </div>
+                </div>
+                <span className={'badge ' + (rec.confidence === '높음' ? 'badge-pos' : rec.confidence === '보통' ? 'badge-warn' : 'badge-mute')}>
+                  표본 {rec.total}건 · 신뢰도 {rec.confidence}
+                </span>
+              </div>
+              <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.55, marginTop: 10 }}>
+                적용 사정률 <span className="tnum strong" style={{ color: 'var(--ink)' }}>{rec.rate.toFixed(3)}%</span>
+                <span> · 예상 투찰률 </span>
+                <span className="tnum strong" style={{ color: 'var(--ink)' }}>{rec.bidRate.toFixed(3)}%</span>
+              </div>
+            </div>
+
+            <CandidateRow label="안정형" sub={`사정률 ${consRate.toFixed(3)}%`} value={cons} tone="mute" featured={rec.key === 'conservative'} />
+            <CandidateRow label="추천형" sub={`사정률 ${balRate.toFixed(3)}%`} value={bal} tone="accent" featured={rec.key === 'middle'} />
+            <CandidateRow label="공격형" sub={`사정률 ${aggRate.toFixed(3)}%`} value={agg} tone="warn" featured={rec.key === 'aggressive'} />
 
             <div className="hr"></div>
             <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.6 }}>

@@ -105,6 +105,8 @@ function normalizeSimilar(real, fallback, notice) {
     avg_competition: real.avg_competition || fallback.avg_competition,
     recent_trend: real.recent_trend || fallback.recent_trend,
     strategy: real.recommendation_reason || real.recommendation || fallback.strategy,
+    recommendation_key: real.recommendation || fallback.recommendation_key || 'middle',
+    recommendation_reason: real.recommendation_reason || fallback.recommendation_reason || '',
     buckets: real.buckets && real.buckets.length
       ? real.buckets
       : _fallbackBuckets(lowAdj || midAdj, midAdj || avgAdj, highAdj || midAdj, total),

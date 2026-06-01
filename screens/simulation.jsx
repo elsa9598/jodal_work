@@ -4,7 +4,7 @@
 const { useState: useStateS, useMemo: useMemoS, useEffect: useEffectS } = React;
 
 function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
-  const { fmt, calcBid, makeSimilar } = window.APP_DATA;
+  const { fmt, calcBid, makeSimilar, getRecommendedBid } = window.APP_DATA;
   const { Icon } = window.UI;
 
   if (!notice) {
@@ -17,20 +17,30 @@ function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
   }
 
   const sim = makeSimilar(notice.id);
+  const rec = getRecommendedBid(notice, sim);
 
-  const consRate = sim.concentrated_range[0];
-  const balRate = +sim.avg_adj.toFixed(2);
-  const aggRate = sim.concentrated_range[1];
+  const consRate = rec.candidates.conservative.rate;
+  const balRate = rec.candidates.middle.rate;
+  const aggRate = rec.candidates.aggressive.rate;
 
-  const [rate, setRate] = useStateS(balRate);
-  const [strategy, setStrategy] = useStateS('balanced');
+  const [rate, setRate] = useStateS(rec.rate);
+  const [strategy, setStrategy] = useStateS(rec.uiKey);
+  const [touched, setTouched] = useStateS(false);
 
   const setStrat = (s) => {
+    setTouched(true);
     setStrategy(s);
     if (s === 'conservative') setRate(consRate);
     if (s === 'balanced') setRate(balRate);
     if (s === 'aggressive') setRate(aggRate);
   };
+
+  useEffectS(() => {
+    if (!touched) {
+      setRate(rec.rate);
+      setStrategy(rec.uiKey);
+    }
+  }, [notice.id, rec.rate, rec.uiKey, touched]);
 
   useEffectS(() => {
     if (Math.abs(rate - consRate) < 0.005) setStrategy('conservative');
@@ -71,7 +81,7 @@ function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 22 }}>
           <div>
             <div className="kicker"><span className="bar"></span>3가지 후보 한눈에 비교</div>
-            <div style={{ fontSize: 18, fontWeight: 700, marginTop: 6 }}>보수형 · 중간형 · 공격형</div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginTop: 6 }}>안정형 · 추천형 · 공격형</div>
           </div>
           <div className="muted" style={{ fontSize: 12, textAlign: 'right' }}>
             기초금액 <span className="tnum strong" style={{ color: 'var(--ink)' }}>{fmt(notice.base_price)}원</span> ·
@@ -80,18 +90,20 @@ function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginBottom: 24 }}>
-          <Candidate label="보수형" sub="안정 · 사정률 하단" rate={consRate} price={cons} tone="mute"
+          <Candidate label="안정형" sub="낙찰 하위권 기준" rate={consRate} price={cons} tone="mute"
+            featured={rec.key === 'conservative'}
             active={strategy === 'conservative'} onClick={() => setStrat('conservative')} diffFromBal={cons - bal} />
-          <Candidate label="중간형" sub="권장 · 평균 사정률" rate={balRate} price={bal} tone="accent"
-            active={strategy === 'balanced'} featured onClick={() => setStrat('balanced')} diffFromBal={0} />
-          <Candidate label="공격형" sub="적극 · 사정률 상단" rate={aggRate} price={agg} tone="warn"
+          <Candidate label="추천형" sub="실낙찰 집중 구간" rate={balRate} price={bal} tone="accent"
+            active={strategy === 'balanced'} featured={rec.key === 'middle'} onClick={() => setStrat('balanced')} diffFromBal={0} />
+          <Candidate label="공격형" sub="낙찰 상위권 기준" rate={aggRate} price={agg} tone="warn"
+            featured={rec.key === 'aggressive'}
             active={strategy === 'aggressive'} onClick={() => setStrat('aggressive')} diffFromBal={agg - bal} />
         </div>
 
         <div style={{ position: 'relative', height: 110, padding: '20px 8px 0' }}>
           <div style={{ position: 'absolute', left: 8, right: 8, top: 50, height: 4, background: 'var(--surface-3)', borderRadius: 999 }}></div>
-          <CandMarker pos={pct(cons)} top label="보수형" sub={fmt(cons) + '원'} tone="mute" />
-          <CandMarker pos={pct(bal)} top label="중간형" sub={fmt(bal) + '원'} tone="accent" />
+          <CandMarker pos={pct(cons)} top label="안정형" sub={fmt(cons) + '원'} tone="mute" />
+          <CandMarker pos={pct(bal)} top label="추천형" sub={fmt(bal) + '원'} tone="accent" />
           <CandMarker pos={pct(agg)} top label="공격형" sub={fmt(agg) + '원'} tone="warn" />
 
           <div style={{ position: 'absolute', left: `calc(${pct(current)}% + 8px)`, top: 36, bottom: 4, transform: 'translateX(-50%)', transition: 'left 0.15s ease', zIndex: 2 }}>
@@ -106,10 +118,10 @@ function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
           <div style={{ display: 'flex', gap: 28, fontSize: 12, flexWrap: 'wrap' }}>
             <div><span className="muted">최저 ↔ 최고 차이 </span><span className="tnum strong">{fmt(agg - cons)}</span><span className="muted"> 원</span></div>
             <div><span className="muted">비율 </span><span className="tnum strong">{((agg - cons) / cons * 100).toFixed(3)}%</span></div>
-            <div><span className="muted">중간 → 공격형 </span><span className="tnum strong" style={{ color: 'var(--warn)' }}>+{fmt(agg - bal)}원</span></div>
-            <div><span className="muted">중간 → 보수형 </span><span className="tnum strong" style={{ color: 'var(--ink-low)' }}>{fmt(cons - bal)}원</span></div>
+            <div><span className="muted">추천형 → 공격형 </span><span className="tnum strong" style={{ color: 'var(--warn)' }}>+{fmt(agg - bal)}원</span></div>
+            <div><span className="muted">추천형 → 안정형 </span><span className="tnum strong" style={{ color: 'var(--ink-low)' }}>{fmt(cons - bal)}원</span></div>
           </div>
-          <span className="badge badge-accent"><Icon name="spark" size={11}/> AI 권장 · 중간형</span>
+          <span className="badge badge-accent"><Icon name="spark" size={11}/> 픽 추천 · {rec.label} · 표본 {rec.total}건</span>
         </div>
       </div>
 
@@ -119,7 +131,7 @@ function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
           <div style={{ fontSize: 16, fontWeight: 700, marginTop: 6, marginBottom: 22 }}>슬라이더로 미세 조정</div>
 
           <div style={{ display: 'flex', gap: 6, marginBottom: 22 }}>
-            {[['conservative', '보수형', consRate],['balanced', '중간형', balRate],['aggressive', '공격형', aggRate],['custom', '직접 입력', null]].map(([k, label, r]) => (
+            {[['conservative', '안정형', consRate],['balanced', '추천형', balRate],['aggressive', '공격형', aggRate],['custom', '직접 입력', null]].map(([k, label, r]) => (
               <button key={k} className={'btn btn-sm' + (strategy === k ? ' btn-primary' : '')}
                 onClick={() => r != null && setStrat(k)} disabled={k === 'custom'}
                 style={{ flex: 1, justifyContent: 'center', opacity: k === 'custom' && strategy !== 'custom' ? 0.6 : 1 }}>
@@ -138,7 +150,7 @@ function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
           <div style={{ position: 'relative', padding: '6px 0 30px' }}>
             <input type="range" className="sim-slider"
               min={notice.rate_range[0]} max={notice.rate_range[1]} step="0.01"
-              value={rate} onChange={e => setRate(parseFloat(e.target.value))} />
+              value={rate} onChange={e => { setTouched(true); setRate(parseFloat(e.target.value)); }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--ink-low)', marginTop: 12 }} className="tnum">
               <span>{notice.rate_range[0]}%</span>
               <span style={{ color: 'var(--accent)' }}>집중 {sim.concentrated_range[0]}~{sim.concentrated_range[1]}%</span>
@@ -151,9 +163,9 @@ function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <span className="muted" style={{ fontSize: 12 }}>직접 입력</span>
             <input className="input" type="number" step="0.01" value={rate}
-              onChange={e => setRate(parseFloat(e.target.value || balRate))} style={{ flex: 1 }} />
+              onChange={e => { setTouched(true); setRate(parseFloat(e.target.value || balRate)); }} style={{ flex: 1 }} />
             <span className="muted">%</span>
-            <button className="btn btn-sm" onClick={() => setRate(balRate)}>리셋</button>
+            <button className="btn btn-sm" onClick={() => { setTouched(false); setRate(rec.rate); setStrategy(rec.uiKey); }}>리셋</button>
           </div>
         </div>
 
@@ -167,7 +179,7 @@ function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
               {fmt(current)}<span style={{ fontSize: 18, color: 'var(--ink-mid)', fontWeight: 600 }}>원</span>
             </div>
             <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
-              {strategy === 'balanced' ? '중간형 · 권장 전략' : strategy === 'conservative' ? '보수형 전략' : strategy === 'aggressive' ? '공격형 전략' : '직접 입력 전략'}
+              {strategy === 'balanced' ? '추천형 · 실낙찰 집중 구간' : strategy === 'conservative' ? '안정형 전략' : strategy === 'aggressive' ? '공격형 전략' : '직접 입력 전략'}
             </div>
           </div>
 

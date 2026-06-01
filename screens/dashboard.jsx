@@ -4,7 +4,7 @@
 const { useState: useStateD } = React;
 
 function DashboardScreen({ notice, finalChoice, onGo }) {
-  const { fmt, calcBid, makeSimilar } = window.APP_DATA;
+  const { fmt, calcBid, makeSimilar, getRecommendedBid } = window.APP_DATA;
   const { Icon, BucketBars } = window.UI;
 
   if (!notice) {
@@ -17,17 +17,18 @@ function DashboardScreen({ notice, finalChoice, onGo }) {
   }
 
   const sim = makeSimilar(notice.id);
-  const consRate = sim.concentrated_range[0];
-  const balRate = +sim.avg_adj.toFixed(2);
-  const aggRate = sim.concentrated_range[1];
-  const cons = calcBid(notice.base_price, consRate, notice.lower_rate);
-  const bal = calcBid(notice.base_price, balRate, notice.lower_rate);
-  const agg = calcBid(notice.base_price, aggRate, notice.lower_rate);
+  const rec = getRecommendedBid(notice, sim);
+  const consRate = rec.candidates.conservative.rate;
+  const balRate = rec.candidates.middle.rate;
+  const aggRate = rec.candidates.aggressive.rate;
+  const cons = rec.candidates.conservative.price;
+  const bal = rec.candidates.middle.price;
+  const agg = rec.candidates.aggressive.price;
 
-  const final = finalChoice || { rate: balRate, strategy: 'balanced', price: bal };
+  const final = finalChoice || { rate: rec.rate, strategy: rec.uiKey, price: rec.price };
 
-  const stratLabel = final.strategy === 'balanced' ? '중간형 (권장)'
-    : final.strategy === 'conservative' ? '보수형'
+  const stratLabel = final.strategy === 'balanced' ? '추천형 (픽 추천)'
+    : final.strategy === 'conservative' ? '안정형'
     : final.strategy === 'aggressive' ? '공격형'
     : '직접 입력';
 
@@ -98,9 +99,9 @@ function DashboardScreen({ notice, finalChoice, onGo }) {
         <div className="card" style={{ gridColumn: 'span 8', background: 'linear-gradient(135deg, rgba(79,140,255,0.06), var(--surface))', border: '1px solid var(--accent-line)' }}>
           <CardLabel n={2} title="추천 투찰 후보 금액" right={<span className="badge badge-accent">최종 선택: {stratLabel}</span>} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginTop: 8 }}>
-            <MoneyTile label="보수형" sub={`사정률 ${consRate}%`} price={cons} active={final.strategy === 'conservative'} tone="mute" />
-            <MoneyTile label="중간형" sub={`사정률 ${balRate}%`} price={bal} active={final.strategy === 'balanced'} tone="accent" />
-            <MoneyTile label="공격형" sub={`사정률 ${aggRate}%`} price={agg} active={final.strategy === 'aggressive'} tone="warn" />
+            <MoneyTile label="안정형" sub={`사정률 ${consRate.toFixed(3)}%`} price={cons} active={final.strategy === 'conservative'} tone="mute" />
+            <MoneyTile label="추천형" sub={`사정률 ${balRate.toFixed(3)}%`} price={bal} active={final.strategy === 'balanced'} tone="accent" />
+            <MoneyTile label="공격형" sub={`사정률 ${aggRate.toFixed(3)}%`} price={agg} active={final.strategy === 'aggressive'} tone="warn" />
           </div>
           <div style={{ marginTop: 14, padding: 14, borderRadius: 12, background: 'var(--bg-2)', border: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
