@@ -107,9 +107,13 @@ function normalizeSimilar(real, fallback, notice) {
     strategy: real.recommendation_reason || real.recommendation || fallback.strategy,
     recommendation_key: real.recommendation || fallback.recommendation_key || 'middle',
     recommendation_reason: real.recommendation_reason || fallback.recommendation_reason || '',
+    filter_label: real.filter_label || fallback.filter_label || '',
+    search_days: real.search_days || fallback.search_days || 0,
+    warning: real.warning || '',
     buckets: real.buckets && real.buckets.length
       ? real.buckets
       : _fallbackBuckets(lowAdj || midAdj, midAdj || avgAdj, highAdj || midAdj, total),
+    recent: Array.isArray(real.recent) ? real.recent : (fallback.recent || []),
     strategies: {
       conservative: Object.assign({}, fallback.strategies.conservative, real.strategies?.conservative, {
         rate: _bidRateToAdj(consBid, lower),

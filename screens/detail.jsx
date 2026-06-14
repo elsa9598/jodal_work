@@ -144,7 +144,7 @@ function DetailScreen({ notice, onGo, saved, onToggleSave }) {
             <div className="kicker"><span className="bar"></span>픽 추천</div>
             <div style={{ fontSize: 16, fontWeight: 700, marginTop: 6, marginBottom: 4 }}>낙찰 가능성 높은 후보 금액</div>
             <div className="muted" style={{ fontSize: 11.5, marginBottom: 14 }}>
-              조달청 실낙찰 데이터의 집중 투찰률을 현재 공고 기초금액에 대입한 참고값입니다.
+              조달청 개찰결과의 집중 투찰률을 현재 공고 기초금액에 대입한 참고값입니다.
             </div>
 
             <div style={{ padding: 16, borderRadius: 12, background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', marginBottom: 12 }}>
@@ -180,7 +180,7 @@ function DetailScreen({ notice, onGo, saved, onToggleSave }) {
           <div className="card">
             <div className="kicker"><span className="bar"></span>다음 단계</div>
             <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6, marginBottom: 14 }}>분석 흐름</div>
-            <StepBtn n={1} label="유사 공사 분석하기" sub="과거 42건의 낙찰률·사정률 패턴" onClick={() => onGo('analysis')} icon="chart" />
+            <StepBtn n={1} label="유사 공사 분석하기" sub="실시간 개찰결과 근거 확인" onClick={() => onGo('analysis')} icon="chart" />
             <StepBtn n={2} label="투찰가 시뮬레이션" sub="슬라이더로 3안 비교 계산" onClick={() => onGo('simulation')} icon="calc" featured />
             <StepBtn n={3} label="결과 대시보드 보기" sub="8개 카드 · 체크리스트" onClick={() => onGo('dashboard')} icon="grid" />
           </div>

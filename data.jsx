@@ -34,6 +34,9 @@ function makeSimilar(noticeId) {
     avg_competition: 0,
     recent_trend: '공고를 선택하면 조달청 낙찰 실데이터로 분석합니다. (분석 대기)',
     strategy: '실데이터 분석 대기',
+    filter_label: '분석 대기',
+    search_days: 0,
+    warning: '',
     buckets: [],
     recent: [],
     strategies: {

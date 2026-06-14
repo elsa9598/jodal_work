@@ -170,18 +170,66 @@ async function fetchBasisAmount(serviceKey, noticeNo) {
   };
 }
 
-// opengCorpInfo "업체명^사업자^대표^낙찰금액^투찰률" → {amt, rate}
+function pickText(obj, keys) {
+  for (const k of keys) {
+    const v = obj && obj[k];
+    if (v != null && String(v).trim()) return String(v).trim();
+  }
+  return '';
+}
+
+function calcAdjRate(bidRate, lowerBound) {
+  const r = Number(bidRate);
+  const l = Number(lowerBound);
+  return r && l ? round((r / l) * 100, 3) : 0;
+}
+
+function dateLabel(s) {
+  const raw = String(s || '');
+  const m = raw.match(/(\d{4})-?(\d{2})-?(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : raw.slice(0, 10);
+}
+
+// opengCorpInfo "업체명^사업자^대표^낙찰금액^투찰률" → {amt, rate, winner}
 function parseOpengCorp(s) {
   if (!s) return null;
   const p = String(s).split('^');
   if (p.length < 5) return null;
+  const winner = String(p[0] || '').trim();
   const amt = toNum(p[p.length - 2]);
   const rate = toNum(p[p.length - 1]);
   if (!rate || rate < 50 || rate > 120) return null;
-  return { amt, rate };
+  return { amt, rate, winner };
 }
 
-function analyzeDistribution(rates, basePrice, lowerBound, biz, region) {
+function makeEvidenceRow(rec, corp, lowerBound) {
+  return {
+    date: dateLabel(pickText(rec, ['opengDt', 'opengDate', 'rlOpengDt'])),
+    agency: pickText(rec, ['ntceInsttNm', 'dminsttNm', 'orderInsttNm']) || '-',
+    title: pickText(rec, ['bidNtceNm', 'cnstwkNm', 'resultNm']) || '공사명 미제공',
+    notice_no: pickText(rec, ['bidNtceNo']),
+    winner: corp.winner || '-',
+    hit: corp.amt || 0,
+    rate: round(corp.rate, 3),
+    adj: calcAdjRate(corp.rate, lowerBound),
+  };
+}
+
+function makeBuckets(rates, lowerBound) {
+  const bins = {};
+  for (const r of rates) {
+    const adj = calcAdjRate(r, lowerBound);
+    if (!adj) continue;
+    const k = Math.round(adj * 20) / 20; // 0.05%p bins
+    bins[k] = (bins[k] || 0) + 1;
+  }
+  return Object.keys(bins).map(Number).sort((a, b) => a - b).map((k) => ({
+    range: `${round(k - 0.025, 3).toFixed(3)}~${round(k + 0.025, 3).toFixed(3)}`,
+    count: bins[k],
+  }));
+}
+
+function analyzeDistribution(rates, basePrice, lowerBound, biz, region, evidence, filterMeta) {
   rates.sort((a, b) => a - b);
   const n = rates.length;
   const avg = rates.reduce((s, r) => s + r, 0) / n;
@@ -228,7 +276,45 @@ function analyzeDistribution(rates, basePrice, lowerBound, biz, region) {
     estimated: false,
     source: '조달청 나라장터 개찰결과 OpenAPI (낙찰자 투찰률 실분포)',
     sample_count: n,
+    search_days: filterMeta?.search_days || 14,
+    filter_label: filterMeta?.label || '금액대 유사 개찰결과',
+    warning: n < 8 ? `표본이 ${n}건뿐이라 추천 신뢰도는 낮습니다.` : '',
+    buckets: makeBuckets(rates, lowerBound),
+    recent: evidence.slice(0, 20),
   };
+}
+
+function scoreOpenResult(rec, basePrice, corp) {
+  const text = [
+    pickText(rec, ['bidNtceNm', 'cnstwkNm', 'resultNm']),
+    pickText(rec, ['ntceInsttNm', 'dminsttNm', 'orderInsttNm']),
+  ].join(' ');
+  const isSeoul = SEOUL_KEYS.some((k) => text.includes(k));
+  const isCivil = WORK_KEYS.some((k) => text.includes(k));
+  const amt = corp.amt || 0;
+  return {
+    isSeoul,
+    isCivil,
+    amount07: amt >= basePrice * 0.7 && amt <= basePrice * 1.3,
+    amount05: amt >= basePrice * 0.5 && amt <= basePrice * 1.5,
+    amountWide: amt >= basePrice * 0.3 && amt <= basePrice * 3.0,
+  };
+}
+
+function chooseEvidence(candidates, basePrice) {
+  const tiers = [
+    { label: '서울·토목/포장·낙찰금액 ±30%', test: (x) => x.score.isSeoul && x.score.isCivil && x.score.amount07 },
+    { label: '토목/포장·낙찰금액 ±30%', test: (x) => x.score.isCivil && x.score.amount07 },
+    { label: '낙찰금액 ±30%', test: (x) => x.score.amount07 },
+    { label: '낙찰금액 50~150%', test: (x) => x.score.amount05 },
+    { label: '낙찰금액 30~300%', test: (x) => x.score.amountWide },
+  ];
+  for (const tier of tiers) {
+    const picked = candidates.filter(tier.test);
+    if (picked.length >= 8) return { picked, label: tier.label };
+  }
+  const fallback = candidates.filter((x) => x.score.amountWide);
+  return { picked: fallback, label: fallback.length ? '낙찰금액 30~300% (표본 부족)' : '조건에 맞는 개찰결과 없음' };
 }
 
 // ── 서울 토목·포장 입찰공고 목록 (앱 notice 형태로 매핑) ──
@@ -494,14 +580,13 @@ export default {
     }
 
     try {
+      const searchDays = Math.min(14, Math.max(1, toNum(payload.search_days) || 14));
       const end = new Date();
       const begin = new Date();
-      begin.setDate(begin.getDate() - 14); // 최근 14일 개찰결과
-      const loBand = basePrice * 0.3;
-      const hiBand = basePrice * 3.0;
-      const rates = [];
+      begin.setDate(begin.getDate() - searchDays);
+      const candidates = [];
 
-      for (let page = 1; page <= 5; page++) {
+      for (let page = 1; page <= 10; page++) {
         const body = await callJodal(OPENG_URL, {
           serviceKey: env.JODAL_API_KEY,
           pageNo: String(page), numOfRows: '100', type: 'json',
@@ -513,22 +598,36 @@ export default {
         for (const rec of list) {
           const c = parseOpengCorp(rec.opengCorpInfo);
           if (!c) continue;
-          // 낙찰금액이 입력 규모와 유사한 건만 (유사 공사 근사)
-          if (c.amt && (c.amt < loBand || c.amt > hiBand)) continue;
-          rates.push(c.rate);
+          if (!c.amt) continue;
+          candidates.push({
+            rec,
+            corp: c,
+            score: scoreOpenResult(rec, basePrice, c),
+            evidence: makeEvidenceRow(rec, c, lowerBound),
+          });
         }
         const total = toNum(body.totalCount);
         if (!list.length || page * 100 >= total) break;
       }
 
-      if (rates.length < 8) {
+      const chosen = chooseEvidence(candidates, basePrice);
+      const evidence = chosen.picked
+        .sort((a, b) => String(b.evidence.date).localeCompare(String(a.evidence.date)))
+        .map((x) => x.evidence);
+      const rates = chosen.picked.map((x) => x.corp.rate);
+
+      if (!rates.length) {
         return json({
-          error: '유사 규모 낙찰 표본 부족(' + rates.length + '건).',
-          sample_count: rates.length,
-        }, 502, origin);
+          error: '조건에 맞는 조달청 개찰결과를 찾지 못했습니다.',
+          sample_count: 0,
+          recent: [],
+        }, 404, origin);
       }
       const result =
-        analyzeDistribution(rates, basePrice, lowerBound, biz, region);
+        analyzeDistribution(rates, basePrice, lowerBound, biz, region, evidence, {
+          search_days: searchDays,
+          label: chosen.label,
+        });
       if (noticeVerified) result.notice_verified = noticeVerified;
       return json(result, 200, origin);
     } catch (e) {

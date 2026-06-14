@@ -1,16 +1,14 @@
 /* global React, window */
-// Screen 4 — 유사공사 AI 분석
-
-const { useState: useStateA, useMemo: useMemoA } = React;
+// Screen 4 — 실시간 유사 공사 분석
 
 function AnalysisScreen({ notice, onGo }) {
   const { fmt, makeSimilar } = window.APP_DATA;
   const { Icon, BucketBars } = window.UI;
 
-  const [period, setPeriod] = useStateA('6개월');
-  const [scope, setScope] = useStateA('동일 공종');
-
   const sim = notice ? makeSimilar(notice.id) : null;
+  const recent = Array.isArray(sim?.recent) ? sim.recent : [];
+  const hasEvidence = recent.length > 0;
+  const pct = (v, digits = 3) => Number(v || 0).toFixed(digits);
 
   if (!notice || !sim) {
     return (
@@ -24,10 +22,10 @@ function AnalysisScreen({ notice, onGo }) {
   return (
     <div className="fade-in">
       <window.UI.PageHead
-        title="유사 공사 AI 분석"
+        title="실시간 유사 공사 분석"
         sub={
           <span>
-            기준 공고 <span className="strong" style={{ color: 'var(--ink)' }}>{notice.title}</span> · 과거 {sim.total}건의 낙찰률·사정률 패턴을 분석합니다.
+            기준 공고 <span className="strong" style={{ color: 'var(--ink)' }}>{notice.title}</span> · 조달청 개찰결과 {sim.total}건을 확인했습니다.
           </span>
         }
         right={
@@ -46,29 +44,20 @@ function AnalysisScreen({ notice, onGo }) {
           <Chip label="동일 공종" value={notice.work} />
           <Chip label="기초금액 ±30%" value={`${fmt(Math.round(notice.base_price * 0.7))} ~ ${fmt(Math.round(notice.base_price * 1.3))}`} />
           <Chip label="면허 조건" value={notice.license} />
-          <Chip label="기간" value={period} />
+          <Chip label="실제 적용 기준" value={sim.filter_label || '분석 대기'} />
+          <Chip label="조회 기간" value={sim.search_days ? `최근 ${sim.search_days}일` : '분석 대기'} />
           <div style={{ flex: 1 }}></div>
-          <select className="select" value={period} onChange={e => setPeriod(e.target.value)}>
-            <option>3개월</option>
-            <option>6개월</option>
-            <option>1년</option>
-            <option>3년</option>
-          </select>
-          <select className="select" value={scope} onChange={e => setScope(e.target.value)}>
-            <option>동일 공종</option>
-            <option>유사 키워드</option>
-            <option>같은 발주기관 우선</option>
-          </select>
+          <span className="badge badge-accent" title={sim.source}>조달청 실시간</span>
         </div>
       </div>
 
       {/* KPI top row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 16 }}>
         <SimKpi label="유사 공사 건수" value={sim.total} unit="건" />
-        <SimKpi label="평균 낙찰률" value={sim.avg_success.toFixed(3)} unit="%" tone="accent" />
-        <SimKpi label="평균 사정률" value={sim.avg_adj.toFixed(3)} unit="%" tone="accent" />
+        <SimKpi label="평균 낙찰률" value={pct(sim.avg_success)} unit="%" tone="accent" />
+        <SimKpi label="평균 사정률" value={pct(sim.avg_adj)} unit="%" tone="accent" />
         <SimKpi label="경쟁률 평균" value={sim.avg_competition} unit="개사" />
-        <SimKpi label="낙찰률 중앙값" value={sim.median_success.toFixed(3)} unit="%" />
+        <SimKpi label="낙찰률 중앙값" value={pct(sim.median_success)} unit="%" />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 16 }}>
@@ -76,8 +65,8 @@ function AnalysisScreen({ notice, onGo }) {
         <div className="card">
           <div className="card-head">
             <div>
-              <div className="kicker"><span className="bar"></span>사정률 분포</div>
-              <div style={{ fontSize: 16, fontWeight: 700, marginTop: 6 }}>유사 공사 사정률 히스토그램</div>
+              <div className="kicker"><span className="bar"></span>실시간 개찰결과</div>
+              <div style={{ fontSize: 16, fontWeight: 700, marginTop: 6 }}>근거 공사의 환산 사정률 분포</div>
             </div>
             <div style={{ display: 'flex', gap: 12, fontSize: 11.5 }}>
               <Legend color="var(--accent)" label={`집중 구간 ${sim.concentrated_range[0]}~${sim.concentrated_range[1]}%`} />
@@ -87,7 +76,7 @@ function AnalysisScreen({ notice, onGo }) {
 
           <BucketBars
             buckets={sim.buckets}
-            highlight={['99.96~99.98', '99.98~100.00', '100.00~100.02']}
+            highlight={sim.buckets && sim.buckets.length ? [sim.buckets.reduce((a, b) => a.count >= b.count ? a : b).range] : []}
           />
 
           <div style={{
@@ -100,8 +89,9 @@ function AnalysisScreen({ notice, onGo }) {
               <strong>가장 많이 나온 구간: </strong>
               <span className="tnum">{sim.most_common_range[0]}% ~ {sim.most_common_range[1]}%</span>
               <span className="muted"> · {sim.recent_trend}</span>
+              {sim.warning && <span style={{ color: 'var(--warn)' }}> {sim.warning}</span>}
             </div>
-            <span className="badge badge-accent">{sim.strategy}</span>
+            <span className="badge badge-accent">근거 {recent.length}건 표시</span>
           </div>
         </div>
 
@@ -117,16 +107,16 @@ function AnalysisScreen({ notice, onGo }) {
           />
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginTop: 20 }}>
-            <RangeStat label="최저" value={sim.min_success.toFixed(3)} unit="%" />
-            <RangeStat label="평균" value={sim.avg_success.toFixed(3)} unit="%" tone="accent" />
-            <RangeStat label="최고" value={sim.max_success.toFixed(3)} unit="%" />
+            <RangeStat label="최저" value={pct(sim.min_success)} unit="%" />
+            <RangeStat label="평균" value={pct(sim.avg_success)} unit="%" tone="accent" />
+            <RangeStat label="최고" value={pct(sim.max_success)} unit="%" />
           </div>
 
           <div className="hr"></div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <Insight icon="info" text={<>경쟁률은 평균 <strong>{sim.avg_competition}개 업체</strong>로, 서울시 도로포장 공사 평균 수준입니다.</>}/>
-            <Insight icon="warn" tone="warn" text={<>최근 사정률은 <strong>100% 부근</strong>에 집중되어 있어 보수형 전략은 순위 밀림 위험이 있습니다.</>}/>
+            <Insight icon="info" text={<>이 표본은 <strong>{sim.filter_label || '실시간 개찰결과'}</strong> 기준으로 자동 선택되었습니다.</>}/>
+            <Insight icon="warn" tone="warn" text={<>표본 수가 적거나 기준이 확장된 경우, 최종 투찰 전 나라장터 원문과 업체 판단을 함께 확인하세요.</>}/>
           </div>
         </div>
       </div>
@@ -136,36 +126,47 @@ function AnalysisScreen({ notice, onGo }) {
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div className="kicker"><span className="bar"></span>참고 데이터</div>
-            <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>최근 유사 공사 낙찰 결과 (10건)</div>
+            <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>실제 참고한 조달청 개찰결과</div>
           </div>
-          <button className="btn btn-sm btn-ghost">전체 {sim.total}건 보기 <Icon name="arrowRight" size={12}/></button>
+          <span className="badge badge-accent">화면 표시 {recent.length}건 / 표본 {sim.total}건</span>
         </div>
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>개찰일</th>
-              <th>발주기관</th>
-              <th>공사명</th>
-              <th className="right">기초금액</th>
-              <th className="right">낙찰금액</th>
-              <th className="right">낙찰률</th>
-              <th className="right">사정률</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sim.recent.map((r, i) => (
-              <tr key={i}>
-                <td className="tnum muted">{r.date}</td>
-                <td>{r.agency}</td>
-                <td>{r.title}</td>
-                <td className="right tnum">{fmt(r.base)}</td>
-                <td className="right tnum strong">{fmt(r.hit)}</td>
-                <td className="right tnum">{r.rate.toFixed(3)}%</td>
-                <td className="right tnum" style={{ color: 'var(--accent)' }}>{r.adj.toFixed(2)}%</td>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>개찰일</th>
+                <th>발주기관</th>
+                <th>공사명</th>
+                <th>낙찰업체</th>
+                <th className="right">낙찰금액</th>
+                <th className="right">투찰률</th>
+                <th className="right">환산 사정률</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {hasEvidence ? recent.map((r, i) => (
+                <tr key={`${r.notice_no || i}-${i}`}>
+                  <td className="tnum muted">{r.date || '-'}</td>
+                  <td>{r.agency || '-'}</td>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>{r.title || '공사명 미제공'}</div>
+                    {r.notice_no && <div className="muted tnum" style={{ fontSize: 11, marginTop: 3 }}>{r.notice_no}</div>}
+                  </td>
+                  <td>{r.winner || '-'}</td>
+                  <td className="right tnum strong">{fmt(r.hit)}</td>
+                  <td className="right tnum">{pct(r.rate)}%</td>
+                  <td className="right tnum" style={{ color: 'var(--accent)' }}>{pct(r.adj)}%</td>
+                </tr>
+              )) : (
+                <tr>
+                  <td colSpan="7" className="center muted" style={{ padding: 28 }}>
+                    공고를 선택하면 조달청 개찰결과 근거가 이곳에 표시됩니다.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -199,7 +200,7 @@ function RangeStat({ label, value, unit, tone }) {
 function RangeBar({ min, avg, max }) {
   // visual scale: anchor min..max
   const total = max - min;
-  const avgPct = ((avg - min) / total) * 100;
+  const avgPct = total > 0 ? ((avg - min) / total) * 100 : 50;
   return (
     <div style={{ position: 'relative', padding: '24px 8px 30px' }}>
       <div style={{ position: 'relative', height: 8, background: 'var(--surface-2)', borderRadius: 999 }}>
