@@ -45,7 +45,7 @@ function HomeScreen({ onGo, onOpenNotice, saved, onToggleSave }) {
             </div>
             <div style={{ fontSize: 13.5, color: 'var(--ink-mid)', marginTop: 12, maxWidth: 600, lineHeight: 1.6 }}>
               서울시 관공서의 토목·포장 공사 입찰을 실시간으로 수집하고,
-              유사 공사 낙찰률·사정률 패턴을 분석해 <strong style={{ color: 'var(--ink)' }}>보수형 / 중간형 / 공격형</strong> 세 가지 후보 금액을 제시합니다.
+              유사 공사 낙찰률·사정률 패턴을 분석해 <strong style={{ color: 'var(--ink)' }}>보수형 / 중간형 / 공격형</strong> 전략과 16개 가격 샘플을 제시합니다.
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
               <button className="btn btn-primary btn-lg" onClick={() => onGo('list')}>
@@ -168,7 +168,7 @@ function HomeScreen({ onGo, onOpenNotice, saved, onToggleSave }) {
             <ol style={{ paddingLeft: 18, fontSize: 12.5, color: 'var(--ink-mid)', lineHeight: 1.9, margin: 0 }}>
               <li>실시간 공고 목록에서 관심 공고 선택</li>
               <li>유사 공사 분석으로 사정률 패턴 확인</li>
-              <li>슬라이더로 보수/중간/공격형 후보 비교</li>
+              <li>낙찰하한율을 반영한 16개 가격 샘플 비교</li>
               <li>결과 대시보드에서 체크리스트 검토 후 투찰</li>
             </ol>
             <button className="btn btn-primary" style={{ width: '100%', marginTop: 14, justifyContent: 'center' }} onClick={() => onGo('list')}>

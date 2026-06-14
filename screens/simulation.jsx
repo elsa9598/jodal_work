@@ -22,6 +22,7 @@ function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
   const consRate = rec.candidates.conservative.rate;
   const balRate = rec.candidates.middle.rate;
   const aggRate = rec.candidates.aggressive.rate;
+  const samples = rec.samples || [];
 
   const [rate, setRate] = useStateS(rec.rate);
   const [strategy, setStrategy] = useStateS(rec.uiKey);
@@ -46,8 +47,9 @@ function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
     if (Math.abs(rate - consRate) < 0.005) setStrategy('conservative');
     else if (Math.abs(rate - balRate) < 0.005) setStrategy('balanced');
     else if (Math.abs(rate - aggRate) < 0.005) setStrategy('aggressive');
+    else if (samples.some((s) => Math.abs(rate - s.rate) < 0.005)) setStrategy('sample');
     else setStrategy('custom');
-  }, [rate]);
+  }, [rate, consRate, balRate, aggRate, notice.id]);
 
   const cons = calcBid(notice.base_price, consRate, notice.lower_rate);
   const bal = calcBid(notice.base_price, balRate, notice.lower_rate);
@@ -203,6 +205,38 @@ function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
         </div>
       </div>
 
+      <div className="card" style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-end', marginBottom: 14 }}>
+          <div>
+            <div className="kicker"><span className="bar"></span>낙찰하한율 기준 가격 샘플</div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginTop: 6 }}>16개 투찰 후보 샘플</div>
+          </div>
+          <div className="muted" style={{ fontSize: 12, textAlign: 'right', lineHeight: 1.55 }}>
+            모든 샘플은 <span className="tnum strong" style={{ color: 'var(--ink)' }}>{notice.lower_rate}%</span> 낙찰하한율을 적용해 계산합니다.
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+          {samples.map((sample) => (
+            <PriceSample
+              key={sample.no}
+              sample={sample}
+              active={Math.abs(rate - sample.rate) < 0.005}
+              onClick={() => {
+                setTouched(true);
+                setRate(sample.rate);
+                setStrategy('sample');
+              }}
+            />
+          ))}
+        </div>
+
+        <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, background: 'var(--bg-2)', border: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', fontSize: 11.5 }}>
+          <span className="muted">계산식: 기초금액 × 사정률 × 낙찰하한율</span>
+          <span className="tnum muted">현재 선택: {rate.toFixed(3)}% · {fmt(current)}원</span>
+        </div>
+      </div>
+
       <div className="card card-tight" style={{ marginTop: 16, background: 'var(--bg-2)', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
         <Icon name="warn" size={16} style={{ color: 'var(--warn)', flex: '0 0 16px', marginTop: 2 }}/>
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.65 }}>
@@ -211,6 +245,45 @@ function SimulationScreen({ notice, onGo, finalChoice, onChooseFinal }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function PriceSample({ sample, active, onClick }) {
+  const { fmt } = window.APP_DATA;
+  const diffLabel = sample.diff === 0 ? '기준' : `${sample.diff > 0 ? '+' : ''}${fmt(sample.diff)}원`;
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        textAlign: 'left',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        padding: 12,
+        borderRadius: 12,
+        background: active ? 'var(--accent-soft)' : 'var(--bg-2)',
+        border: '1px solid ' + (active ? 'var(--accent-line)' : 'var(--line)'),
+        color: 'var(--ink)',
+        minHeight: 116,
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <span className={'badge ' + (active ? 'badge-accent' : 'badge-mute')}>#{sample.no}</span>
+        <span className="tnum muted" style={{ fontSize: 11 }}>{diffLabel}</span>
+      </div>
+      <div className="tnum" style={{ fontSize: 20, fontWeight: 800, color: active ? 'var(--accent)' : 'var(--ink)', marginTop: 10 }}>
+        {fmt(sample.price)}<span className="muted" style={{ fontSize: 11, fontWeight: 500 }}>원</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 10 }}>
+        <div>
+          <div className="muted" style={{ fontSize: 10.5 }}>사정률</div>
+          <div className="tnum strong" style={{ fontSize: 12 }}>{sample.rate.toFixed(3)}%</div>
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: 10.5 }}>투찰률</div>
+          <div className="tnum strong" style={{ fontSize: 12 }}>{sample.bidRate.toFixed(3)}%</div>
+        </div>
+      </div>
+    </button>
   );
 }
 

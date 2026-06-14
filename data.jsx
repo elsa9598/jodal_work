@@ -64,6 +64,45 @@ function fmt억(n) {
 function calcBid(base, adj, lower) {
   return Math.round(base * (adj / 100) * (lower / 100));
 }
+
+function clamp(n, lo, hi) {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+function makeBidSamples(notice, selectedRate) {
+  if (!notice) return [];
+  const lo = Number(notice.rate_range && notice.rate_range[0]) || 97;
+  const hi = Number(notice.rate_range && notice.rate_range[1]) || 103;
+  const lower = Number(notice.lower_rate) || 0;
+  const center = clamp(Number(selectedRate) || ((lo + hi) / 2), lo, hi);
+  const step = 0.01;
+  let start = center - 0.08;
+  if (start < lo) start = lo;
+  if (start + step * 15 > hi) start = hi - step * 15;
+  start = clamp(start, lo, hi);
+
+  return Array.from({ length: 16 }, (_, i) => {
+    const rate = +clamp(start + step * i, lo, hi).toFixed(3);
+    const price = calcBid(notice.base_price, rate, lower);
+    const bidRate = +(rate * lower / 100).toFixed(3);
+    return {
+      no: i + 1,
+      rate,
+      bidRate,
+      price,
+      diff: 0,
+      isCenter: Math.abs(rate - center) < 0.005,
+    };
+  }).map((sample) => ({
+    ...sample,
+    diff: priceDiff(sample.price, calcBid(notice.base_price, center, lower)),
+  }));
+}
+
+function priceDiff(price, centerPrice) {
+  return Math.round((Number(price) || 0) - (Number(centerPrice) || 0));
+}
+
 function getRecommendedBid(notice, sim) {
   if (!notice) return null;
   const lo = Number(notice.rate_range && notice.rate_range[0]) || 97;
@@ -130,6 +169,7 @@ function getRecommendedBid(notice, sim) {
       ? (sim.recommendation_reason || sim.strategy || sim.recent_trend)
       : '공고를 선택하면 조달청 실데이터 기반으로 추천 금액을 계산합니다.',
     candidates,
+    samples: makeBidSamples(notice, selected.rate),
   };
 }
 function statusLabel(s) {
@@ -141,5 +181,5 @@ function statusLabel(s) {
 
 window.APP_DATA = {
   AGENCIES, WORK_TYPES, NOTICES, MY_HISTORY,
-  makeSimilar, fmt, fmtKRW, fmt억, calcBid, getRecommendedBid, statusLabel,
+  makeSimilar, fmt, fmtKRW, fmt억, calcBid, makeBidSamples, getRecommendedBid, statusLabel,
 };

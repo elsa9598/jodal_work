@@ -181,7 +181,7 @@ function DetailScreen({ notice, onGo, saved, onToggleSave }) {
             <div className="kicker"><span className="bar"></span>다음 단계</div>
             <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6, marginBottom: 14 }}>분석 흐름</div>
             <StepBtn n={1} label="유사 공사 분석하기" sub="실시간 개찰결과 근거 확인" onClick={() => onGo('analysis')} icon="chart" />
-            <StepBtn n={2} label="투찰가 시뮬레이션" sub="슬라이더로 3안 비교 계산" onClick={() => onGo('simulation')} icon="calc" featured />
+            <StepBtn n={2} label="투찰가 시뮬레이션" sub="낙찰하한율 기준 16개 샘플" onClick={() => onGo('simulation')} icon="calc" featured />
             <StepBtn n={3} label="결과 대시보드 보기" sub="8개 카드 · 체크리스트" onClick={() => onGo('dashboard')} icon="grid" />
           </div>
 
