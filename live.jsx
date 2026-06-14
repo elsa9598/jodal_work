@@ -13,8 +13,10 @@
  *   POST /analyze → 최근 유사 낙찰자 투찰률 실분포
  */
 
+const DEFAULT_PROXY_URL = 'https://judal-proxy.3dleader0128.workers.dev';
+
 function _proxyBase() {
-  return (window.PROXY_URL || '').replace(/\/+$/, '');
+  return (window.PROXY_URL || DEFAULT_PROXY_URL || '').replace(/\/+$/, '');
 }
 
 async function _post(path, body) {
